@@ -6,14 +6,18 @@ import (
 	"net/http"
 
 	db "github.com/Izone-hub/talent-backend/database"
+	"github.com/Izone-hub/talent-backend/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type UserController struct {
-	db  *db.Queries
-	ctx context.Context
+	db        *db.Queries
+	ctx       context.Context
+	jwtSecret string
 }
 
 type CreateUser struct {
@@ -23,8 +27,8 @@ type CreateUser struct {
 	Password  string `json:"password" binding:"required"`
 }
 
-func NewUserController(db *db.Queries, ctx context.Context) *UserController {
-	return &UserController{db, ctx}
+func NewUserController(db *db.Queries, ctx context.Context, jwtSecret string) *UserController {
+	return &UserController{db, ctx, jwtSecret}
 }
 
 func (uc *UserController) CreateUser(ctx *gin.Context) {
@@ -35,11 +39,20 @@ func (uc *UserController) CreateUser(ctx *gin.Context) {
 		return
 	}
 
+	// Hash password with bcrypt
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(payload.Password), bcrypt.DefaultCost)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "Failed to hash password", "error": err.Error()})
+		return
+	}
+
+	newUUID := uuid.New()
 	args := &db.CreateUserParams{
+		ID:        pgtype.UUID{Bytes: newUUID, Valid: true},
 		FirstName: payload.FirstName,
 		LastName:  payload.LastName,
 		Email:     payload.Email,
-		Password:  payload.Password,
+		Password:  string(hashedPassword),
 	}
 
 	user, err := uc.db.CreateUser(ctx, *args)
@@ -59,7 +72,14 @@ type GetUserById struct {
 func (uc *UserController) GetUserById(ctx *gin.Context) {
 	userId := ctx.Param("userId")
 
-	user, err := uc.db.GetUserById(ctx, uuid.MustParse(userId))
+	parsedUUID, err := uuid.Parse(userId)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "failed", "message": "Invalid user ID format"})
+		return
+	}
+
+	pgUUID := pgtype.UUID{Bytes: parsedUUID, Valid: true}
+	user, err := uc.db.GetUserById(ctx, pgUUID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			ctx.JSON(http.StatusNotFound, gin.H{"status": "failed", "message": "Failed to retrieve user with this ID"})
@@ -70,4 +90,74 @@ func (uc *UserController) GetUserById(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"status": "Successfully retrived id", "user": user})
+}
+
+type LoginRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
+
+type LoginResponse struct {
+	Token string `json:"token"`
+	User  struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+	} `json:"user"`
+}
+
+func (uc *UserController) Login(ctx *gin.Context) {
+	var payload *LoginRequest
+
+	if err := ctx.ShouldBindJSON(&payload); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "Failed payload", "error": err.Error()})
+		return
+	}
+
+	// Get user by email
+	user, err := uc.db.GetUserByEmail(ctx, payload.Email)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"status": "failed", "message": "Invalid email or password"})
+			return
+		}
+		ctx.JSON(http.StatusBadGateway, gin.H{"status": "Failed retrieving user", "error": err.Error()})
+		return
+	}
+
+	// Compare password with hashed password
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(payload.Password))
+	if err != nil {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"status": "failed", "message": "Invalid email or password"})
+		return
+	}
+
+	// Convert pgtype.UUID to string
+	var userIDStr string
+	if user.ID.Valid {
+		userUUID := uuid.UUID(user.ID.Bytes)
+		userIDStr = userUUID.String()
+	} else {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "Invalid user ID"})
+		return
+	}
+
+	// Generate JWT token
+	token, err := utils.GenerateToken(userIDStr, user.Email, uc.jwtSecret)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "Failed to generate token", "error": err.Error()})
+		return
+	}
+
+	response := LoginResponse{
+		Token: token,
+		User: struct {
+			ID    string `json:"id"`
+			Email string `json:"email"`
+		}{
+			ID:    userIDStr,
+			Email: user.Email,
+		},
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": response})
 }

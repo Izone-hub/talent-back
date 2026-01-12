@@ -8,7 +8,6 @@ package database
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -19,7 +18,7 @@ RETURNING id, email
 `
 
 type CreateUserParams struct {
-	ID        uuid.UUID
+	ID        pgtype.UUID
 	FirstName string
 	LastName  string
 	Email     string
@@ -27,7 +26,7 @@ type CreateUserParams struct {
 }
 
 type CreateUserRow struct {
-	ID    uuid.UUID
+	ID    pgtype.UUID
 	Email string
 }
 
@@ -50,7 +49,7 @@ WHERE email = $1 LIMIT 1
 `
 
 type GetUserByEmailRow struct {
-	ID       uuid.UUID
+	ID       pgtype.UUID
 	Email    string
 	Password string
 }
@@ -68,7 +67,7 @@ WHERE id = $1 LIMIT 1
 `
 
 type GetUserByIdRow struct {
-	ID        uuid.UUID
+	ID        pgtype.UUID
 	FirstName string
 	LastName  string
 	Email     string
@@ -76,7 +75,7 @@ type GetUserByIdRow struct {
 	UpdatedAt pgtype.Timestamp
 }
 
-func (q *Queries) GetUserById(ctx context.Context, id uuid.UUID) (GetUserByIdRow, error) {
+func (q *Queries) GetUserById(ctx context.Context, id pgtype.UUID) (GetUserByIdRow, error) {
 	row := q.db.QueryRow(ctx, getUserById, id)
 	var i GetUserByIdRow
 	err := row.Scan(
@@ -103,7 +102,7 @@ type ListUsersParams struct {
 }
 
 type ListUsersRow struct {
-	ID        uuid.UUID
+	ID        pgtype.UUID
 	FirstName string
 	LastName  string
 	Email     string
