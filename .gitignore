@@ -1,1 +1,24 @@
+# Binaries
+*.exe
+*.out
+*.test
+talent-backend
+
+# Environment
 .env
+
+# Logs
+*.log
+
+# Local database / cache
+*.db
+tmp/
+cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -9,11 +9,16 @@ import (
 )
 
 type User struct {
-	ID        pgtype.UUID
-	FirstName string
-	LastName  string
-	Email     string
-	Password  string
-	CreatedAt pgtype.Timestamp
-	UpdatedAt pgtype.Timestamp
+	ID                   pgtype.UUID
+	GithubID             int64
+	GithubUsername       string
+	Email                pgtype.Text
+	AvatarUrl            pgtype.Text
+	Name                 pgtype.Text
+	Role                 string
+	GithubAccessToken    pgtype.Text
+	GithubTokenExpiresAt pgtype.Timestamp
+	LastLoginAt          pgtype.Timestamp
+	CreatedAt            pgtype.Timestamp
+	UpdatedAt            pgtype.Timestamp
 }
