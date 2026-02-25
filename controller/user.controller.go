@@ -52,7 +52,7 @@ func (uc *UserController) CreateUser(ctx *gin.Context) {
 		FirstName: payload.FirstName,
 		LastName:  payload.LastName,
 		Email:     payload.Email,
-		Password:  string(hashedPassword),
+		Password:  utils.StringToText(string(hashedPassword)),
 	}
 
 	user, err := uc.db.CreateUser(ctx, *args)
@@ -125,7 +125,8 @@ func (uc *UserController) Login(ctx *gin.Context) {
 	}
 
 	// Compare password with hashed password
-	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(payload.Password))
+	passwordValue := utils.GetTextValue(user.Password)
+	err = bcrypt.CompareHashAndPassword([]byte(passwordValue), []byte(payload.Password))
 	if err != nil {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"status": "failed", "message": "Invalid email or password"})
 		return
@@ -133,16 +134,28 @@ func (uc *UserController) Login(ctx *gin.Context) {
 
 	// Convert pgtype.UUID to string
 	var userIDStr string
+	var parsedUUID uuid.UUID
 	if user.ID.Valid {
-		userUUID := uuid.UUID(user.ID.Bytes)
-		userIDStr = userUUID.String()
+		parsedUUID = uuid.UUID(user.ID.Bytes)
+		userIDStr = parsedUUID.String()
 	} else {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "Invalid user ID"})
 		return
 	}
 
-	// Generate JWT token
-	token, err := utils.GenerateToken(userIDStr, user.Email, uc.jwtSecret)
+	// Get user role from database
+	userFull, err := uc.db.GetUserById(uc.ctx, pgtype.UUID{Bytes: parsedUUID, Valid: true})
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "Invalid user ID"})
+		return
+	}
+
+	// Generate JWT token with role
+	userRole := utils.GetTextValue(userFull.Role)
+	if userRole == "" {
+		userRole = "applicant" // Default role
+	}
+	token, err := utils.GenerateToken(userIDStr, user.Email, userRole, uc.jwtSecret)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"status": "Failed to generate token", "error": err.Error()})
 		return

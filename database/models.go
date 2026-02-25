@@ -5,15 +5,251 @@
 package database
 
 import (
+	"database/sql/driver"
+	"fmt"
+
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ApplicationStatus string
+
+const (
+	ApplicationStatusPending       ApplicationStatus = "Pending"
+	ApplicationStatusQuizGenerated ApplicationStatus = "QuizGenerated"
+	ApplicationStatusReviewed      ApplicationStatus = "Reviewed"
+	ApplicationStatusShortlisted   ApplicationStatus = "Shortlisted"
+	ApplicationStatusAccepted      ApplicationStatus = "Accepted"
+	ApplicationStatusRejected      ApplicationStatus = "Rejected"
+	ApplicationStatusInTalentPool  ApplicationStatus = "InTalentPool"
+)
+
+func (e *ApplicationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ApplicationStatus(s)
+	case string:
+		*e = ApplicationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ApplicationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullApplicationStatus struct {
+	ApplicationStatus ApplicationStatus
+	Valid             bool // Valid is true if ApplicationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullApplicationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ApplicationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ApplicationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullApplicationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ApplicationStatus), nil
+}
+
+type JobRoles string
+
+const (
+	JobRolesFrontend  JobRoles = "Frontend"
+	JobRolesBackend   JobRoles = "Backend"
+	JobRolesFullstack JobRoles = "Fullstack"
+	JobRolesUiUx      JobRoles = "Ui_Ux"
+)
+
+func (e *JobRoles) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = JobRoles(s)
+	case string:
+		*e = JobRoles(s)
+	default:
+		return fmt.Errorf("unsupported scan type for JobRoles: %T", src)
+	}
+	return nil
+}
+
+type NullJobRoles struct {
+	JobRoles JobRoles
+	Valid    bool // Valid is true if JobRoles is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullJobRoles) Scan(value interface{}) error {
+	if value == nil {
+		ns.JobRoles, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.JobRoles.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullJobRoles) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.JobRoles), nil
+}
+
+type JobStatus string
+
+const (
+	JobStatusOpen   JobStatus = "Open"
+	JobStatusClosed JobStatus = "Closed"
+)
+
+func (e *JobStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = JobStatus(s)
+	case string:
+		*e = JobStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for JobStatus: %T", src)
+	}
+	return nil
+}
+
+type NullJobStatus struct {
+	JobStatus JobStatus
+	Valid     bool // Valid is true if JobStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullJobStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.JobStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.JobStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullJobStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.JobStatus), nil
+}
+
+type Applicant struct {
+	ID           pgtype.UUID
+	FirstName    string
+	LastName     string
+	Email        string
+	GithubLink   pgtype.Text
+	LinkedinLink pgtype.Text
+	ResumePdf    string
+	CreatedAt    pgtype.Timestamp
+}
+
+type Application struct {
+	ID            pgtype.UUID
+	ApplicantID   pgtype.UUID
+	JobID         pgtype.UUID
+	Status        ApplicationStatus
+	GeneratedQuiz uuid.UUID
+	AppliedAt     pgtype.Timestamp
+}
+
+type Job struct {
+	ID           pgtype.UUID
+	Title        string
+	Description  string
+	Role         JobRoles
+	CategoryID   pgtype.UUID
+	Requirements pgtype.Text
+	Location     pgtype.Text
+	JobType      pgtype.Text
+	Status       JobStatus
+	CreatedBy    pgtype.UUID
+	CreatedAt    pgtype.Timestamp
+}
+
+type JobCategory struct {
+	ID          pgtype.UUID
+	Name        string
+	Description pgtype.Text
+	CreatedAt   pgtype.Timestamp
+}
+
+type Quiz struct {
+	ID            pgtype.UUID
+	ApplicationID pgtype.UUID
+	Questions     []byte
+	CreatedAt     pgtype.Timestamp
+}
+
+type Repository struct {
+	ID            pgtype.UUID
+	UserID        pgtype.UUID
+	GithubRepoID  int64
+	Name          string
+	FullName      string
+	Description   pgtype.Text
+	Url           string
+	HtmlUrl       string
+	Language      pgtype.Text
+	Languages     []byte
+	ReadmeContent pgtype.Text
+	ReadmeHtml    pgtype.Text
+	TechStack     []byte
+	Stars         pgtype.Int4
+	Forks         pgtype.Int4
+	IsPrivate     pgtype.Bool
+	CreatedAt     pgtype.Timestamp
+	UpdatedAt     pgtype.Timestamp
+}
+
+type TalentPool struct {
+	ID                pgtype.UUID
+	UserID            pgtype.UUID
+	Status            pgtype.Text
+	Tags              []string
+	Notes             pgtype.Text
+	Rating            pgtype.Int4
+	LastContactedAt   pgtype.Timestamp
+	LastAppliedAt     pgtype.Timestamp
+	TotalApplications pgtype.Int4
+	AcceptedJobs      pgtype.Int4
+	CreatedAt         pgtype.Timestamp
+	UpdatedAt         pgtype.Timestamp
+}
+
 type User struct {
-	ID        pgtype.UUID
-	FirstName string
-	LastName  string
-	Email     string
-	Password  string
-	CreatedAt pgtype.Timestamp
-	UpdatedAt pgtype.Timestamp
+	ID                 pgtype.UUID
+	FirstName          string
+	LastName           string
+	Email              string
+	Password           pgtype.Text
+	GithubUsername     pgtype.Text
+	GithubID           pgtype.Int8
+	AvatarUrl          pgtype.Text
+	GithubAccessToken  pgtype.Text
+	Bio                pgtype.Text
+	Location           pgtype.Text
+	Company            pgtype.Text
+	Blog               pgtype.Text
+	TechStack          []byte
+	TalentStatus       pgtype.Text
+	AvailabilityStatus pgtype.Text
+	ExperienceLevel    pgtype.Text
+	Role               pgtype.Text
+	AuthProvider       pgtype.Text
+	LastActiveAt       pgtype.Timestamp
+	CreatedAt          pgtype.Timestamp
+	UpdatedAt          pgtype.Timestamp
 }

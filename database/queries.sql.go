@@ -8,8 +8,317 @@ package database
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const checkApplicationExists = `-- name: CheckApplicationExists :one
+SELECT COUNT(*) FROM application
+WHERE applicant_id = $1 AND job_id = $2
+`
+
+type CheckApplicationExistsParams struct {
+	ApplicantID pgtype.UUID
+	JobID       pgtype.UUID
+}
+
+func (q *Queries) CheckApplicationExists(ctx context.Context, arg CheckApplicationExistsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, checkApplicationExists, arg.ApplicantID, arg.JobID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createApplicant = `-- name: CreateApplicant :one
+INSERT INTO applicants (id, first_name, last_name, email, github_link, linkedin_link, resume_pdf)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, first_name, last_name, email, github_link, linkedin_link, resume_pdf, created_at
+`
+
+type CreateApplicantParams struct {
+	ID           pgtype.UUID
+	FirstName    string
+	LastName     string
+	Email        string
+	GithubLink   pgtype.Text
+	LinkedinLink pgtype.Text
+	ResumePdf    string
+}
+
+// Applicants Queries
+func (q *Queries) CreateApplicant(ctx context.Context, arg CreateApplicantParams) (Applicant, error) {
+	row := q.db.QueryRow(ctx, createApplicant,
+		arg.ID,
+		arg.FirstName,
+		arg.LastName,
+		arg.Email,
+		arg.GithubLink,
+		arg.LinkedinLink,
+		arg.ResumePdf,
+	)
+	var i Applicant
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.GithubLink,
+		&i.LinkedinLink,
+		&i.ResumePdf,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createApplication = `-- name: CreateApplication :one
+INSERT INTO application (id, applicant_id, job_id, status)
+VALUES ($1, $2, $3, $4)
+RETURNING id, applicant_id, job_id, status, generated_quiz, applied_at
+`
+
+type CreateApplicationParams struct {
+	ID          pgtype.UUID
+	ApplicantID pgtype.UUID
+	JobID       pgtype.UUID
+	Status      ApplicationStatus
+}
+
+// Application Queries
+func (q *Queries) CreateApplication(ctx context.Context, arg CreateApplicationParams) (Application, error) {
+	row := q.db.QueryRow(ctx, createApplication,
+		arg.ID,
+		arg.ApplicantID,
+		arg.JobID,
+		arg.Status,
+	)
+	var i Application
+	err := row.Scan(
+		&i.ID,
+		&i.ApplicantID,
+		&i.JobID,
+		&i.Status,
+		&i.GeneratedQuiz,
+		&i.AppliedAt,
+	)
+	return i, err
+}
+
+const createJob = `-- name: CreateJob :one
+INSERT INTO jobs (id, title, description, role, category_id, requirements, location, job_type, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, title, description, role, category_id, requirements, location, job_type, status, created_by, created_at
+`
+
+type CreateJobParams struct {
+	ID           pgtype.UUID
+	Title        string
+	Description  string
+	Role         JobRoles
+	CategoryID   pgtype.UUID
+	Requirements pgtype.Text
+	Location     pgtype.Text
+	JobType      pgtype.Text
+	Status       JobStatus
+	CreatedBy    pgtype.UUID
+}
+
+// Jobs Queries
+func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, createJob,
+		arg.ID,
+		arg.Title,
+		arg.Description,
+		arg.Role,
+		arg.CategoryID,
+		arg.Requirements,
+		arg.Location,
+		arg.JobType,
+		arg.Status,
+		arg.CreatedBy,
+	)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.Role,
+		&i.CategoryID,
+		&i.Requirements,
+		&i.Location,
+		&i.JobType,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createJobCategory = `-- name: CreateJobCategory :one
+INSERT INTO job_categories (id, name, description)
+VALUES ($1, $2, $3)
+RETURNING id, name, description, created_at
+`
+
+type CreateJobCategoryParams struct {
+	ID          pgtype.UUID
+	Name        string
+	Description pgtype.Text
+}
+
+// Job Categories Queries
+func (q *Queries) CreateJobCategory(ctx context.Context, arg CreateJobCategoryParams) (JobCategory, error) {
+	row := q.db.QueryRow(ctx, createJobCategory, arg.ID, arg.Name, arg.Description)
+	var i JobCategory
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createQuiz = `-- name: CreateQuiz :one
+INSERT INTO quiz (id, application_id, questions)
+VALUES ($1, $2, $3)
+RETURNING id, application_id, questions, created_at
+`
+
+type CreateQuizParams struct {
+	ID            pgtype.UUID
+	ApplicationID pgtype.UUID
+	Questions     []byte
+}
+
+// Quiz Queries
+func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, error) {
+	row := q.db.QueryRow(ctx, createQuiz, arg.ID, arg.ApplicationID, arg.Questions)
+	var i Quiz
+	err := row.Scan(
+		&i.ID,
+		&i.ApplicationID,
+		&i.Questions,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createRepository = `-- name: CreateRepository :one
+INSERT INTO repositories (
+    id, user_id, github_repo_id, name, full_name, description,
+    url, html_url, language, languages, readme_content, readme_html,
+    tech_stack, stars, forks, is_private
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+RETURNING id, user_id, github_repo_id, name, full_name, description, url, html_url, language, languages, readme_content, readme_html, tech_stack, stars, forks, is_private, created_at, updated_at
+`
+
+type CreateRepositoryParams struct {
+	ID            pgtype.UUID
+	UserID        pgtype.UUID
+	GithubRepoID  int64
+	Name          string
+	FullName      string
+	Description   pgtype.Text
+	Url           string
+	HtmlUrl       string
+	Language      pgtype.Text
+	Languages     []byte
+	ReadmeContent pgtype.Text
+	ReadmeHtml    pgtype.Text
+	TechStack     []byte
+	Stars         pgtype.Int4
+	Forks         pgtype.Int4
+	IsPrivate     pgtype.Bool
+}
+
+// Repository Queries
+func (q *Queries) CreateRepository(ctx context.Context, arg CreateRepositoryParams) (Repository, error) {
+	row := q.db.QueryRow(ctx, createRepository,
+		arg.ID,
+		arg.UserID,
+		arg.GithubRepoID,
+		arg.Name,
+		arg.FullName,
+		arg.Description,
+		arg.Url,
+		arg.HtmlUrl,
+		arg.Language,
+		arg.Languages,
+		arg.ReadmeContent,
+		arg.ReadmeHtml,
+		arg.TechStack,
+		arg.Stars,
+		arg.Forks,
+		arg.IsPrivate,
+	)
+	var i Repository
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.GithubRepoID,
+		&i.Name,
+		&i.FullName,
+		&i.Description,
+		&i.Url,
+		&i.HtmlUrl,
+		&i.Language,
+		&i.Languages,
+		&i.ReadmeContent,
+		&i.ReadmeHtml,
+		&i.TechStack,
+		&i.Stars,
+		&i.Forks,
+		&i.IsPrivate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createTalentPoolEntry = `-- name: CreateTalentPoolEntry :one
+INSERT INTO talent_pool (
+    id, user_id, status, tags, notes, rating
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, user_id, status, tags, notes, rating, last_contacted_at, last_applied_at, total_applications, accepted_jobs, created_at, updated_at
+`
+
+type CreateTalentPoolEntryParams struct {
+	ID     pgtype.UUID
+	UserID pgtype.UUID
+	Status pgtype.Text
+	Tags   []string
+	Notes  pgtype.Text
+	Rating pgtype.Int4
+}
+
+func (q *Queries) CreateTalentPoolEntry(ctx context.Context, arg CreateTalentPoolEntryParams) (TalentPool, error) {
+	row := q.db.QueryRow(ctx, createTalentPoolEntry,
+		arg.ID,
+		arg.UserID,
+		arg.Status,
+		arg.Tags,
+		arg.Notes,
+		arg.Rating,
+	)
+	var i TalentPool
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Tags,
+		&i.Notes,
+		&i.Rating,
+		&i.LastContactedAt,
+		&i.LastAppliedAt,
+		&i.TotalApplications,
+		&i.AcceptedJobs,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, first_name, last_name, email, password)
@@ -22,7 +331,7 @@ type CreateUserParams struct {
 	FirstName string
 	LastName  string
 	Email     string
-	Password  string
+	Password  pgtype.Text
 }
 
 type CreateUserRow struct {
@@ -43,50 +352,1144 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 	return i, err
 }
 
-const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password FROM users
-WHERE email = $1 LIMIT 1
+const createUserWithGithub = `-- name: CreateUserWithGithub :one
+INSERT INTO users (
+    id, first_name, last_name, email, github_username, github_id,
+    avatar_url, auth_provider, github_access_token, bio, location,
+    company, blog, role, talent_status, availability_status
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+RETURNING id, first_name, last_name, email, password, github_username, github_id, avatar_url, github_access_token, bio, location, company, blog, tech_stack, talent_status, availability_status, experience_level, role, auth_provider, last_active_at, created_at, updated_at
 `
 
-type GetUserByEmailRow struct {
-	ID       pgtype.UUID
-	Email    string
-	Password string
+type CreateUserWithGithubParams struct {
+	ID                 pgtype.UUID
+	FirstName          string
+	LastName           string
+	Email              string
+	GithubUsername     pgtype.Text
+	GithubID           pgtype.Int8
+	AvatarUrl          pgtype.Text
+	AuthProvider       pgtype.Text
+	GithubAccessToken  pgtype.Text
+	Bio                pgtype.Text
+	Location           pgtype.Text
+	Company            pgtype.Text
+	Blog               pgtype.Text
+	Role               pgtype.Text
+	TalentStatus       pgtype.Text
+	AvailabilityStatus pgtype.Text
 }
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
-	row := q.db.QueryRow(ctx, getUserByEmail, email)
-	var i GetUserByEmailRow
-	err := row.Scan(&i.ID, &i.Email, &i.Password)
-	return i, err
-}
-
-const getUserById = `-- name: GetUserById :one
-SELECT id, first_name, last_name, email, created_at, updated_at FROM users
-WHERE id = $1 LIMIT 1
-`
-
-type GetUserByIdRow struct {
-	ID        pgtype.UUID
-	FirstName string
-	LastName  string
-	Email     string
-	CreatedAt pgtype.Timestamp
-	UpdatedAt pgtype.Timestamp
-}
-
-func (q *Queries) GetUserById(ctx context.Context, id pgtype.UUID) (GetUserByIdRow, error) {
-	row := q.db.QueryRow(ctx, getUserById, id)
-	var i GetUserByIdRow
+func (q *Queries) CreateUserWithGithub(ctx context.Context, arg CreateUserWithGithubParams) (User, error) {
+	row := q.db.QueryRow(ctx, createUserWithGithub,
+		arg.ID,
+		arg.FirstName,
+		arg.LastName,
+		arg.Email,
+		arg.GithubUsername,
+		arg.GithubID,
+		arg.AvatarUrl,
+		arg.AuthProvider,
+		arg.GithubAccessToken,
+		arg.Bio,
+		arg.Location,
+		arg.Company,
+		arg.Blog,
+		arg.Role,
+		arg.TalentStatus,
+		arg.AvailabilityStatus,
+	)
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.FirstName,
 		&i.LastName,
 		&i.Email,
+		&i.Password,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.AvatarUrl,
+		&i.GithubAccessToken,
+		&i.Bio,
+		&i.Location,
+		&i.Company,
+		&i.Blog,
+		&i.TechStack,
+		&i.TalentStatus,
+		&i.AvailabilityStatus,
+		&i.ExperienceLevel,
+		&i.Role,
+		&i.AuthProvider,
+		&i.LastActiveAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const deleteApplicant = `-- name: DeleteApplicant :exec
+DELETE FROM applicants
+WHERE id = $1
+`
+
+func (q *Queries) DeleteApplicant(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteApplicant, id)
+	return err
+}
+
+const deleteApplication = `-- name: DeleteApplication :exec
+DELETE FROM application
+WHERE id = $1
+`
+
+func (q *Queries) DeleteApplication(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteApplication, id)
+	return err
+}
+
+const deleteJob = `-- name: DeleteJob :exec
+DELETE FROM jobs
+WHERE id = $1
+`
+
+func (q *Queries) DeleteJob(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteJob, id)
+	return err
+}
+
+const deleteJobCategory = `-- name: DeleteJobCategory :exec
+DELETE FROM job_categories
+WHERE id = $1
+`
+
+func (q *Queries) DeleteJobCategory(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteJobCategory, id)
+	return err
+}
+
+const deleteQuiz = `-- name: DeleteQuiz :exec
+DELETE FROM quiz
+WHERE id = $1
+`
+
+func (q *Queries) DeleteQuiz(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteQuiz, id)
+	return err
+}
+
+const deleteRepositoriesByUserId = `-- name: DeleteRepositoriesByUserId :exec
+DELETE FROM repositories WHERE user_id = $1
+`
+
+func (q *Queries) DeleteRepositoriesByUserId(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRepositoriesByUserId, userID)
+	return err
+}
+
+const deleteRepository = `-- name: DeleteRepository :exec
+DELETE FROM repositories WHERE id = $1
+`
+
+func (q *Queries) DeleteRepository(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRepository, id)
+	return err
+}
+
+const getApplicantByEmail = `-- name: GetApplicantByEmail :one
+SELECT id, first_name, last_name, email, github_link, linkedin_link, resume_pdf, created_at FROM applicants
+WHERE email = $1 LIMIT 1
+`
+
+func (q *Queries) GetApplicantByEmail(ctx context.Context, email string) (Applicant, error) {
+	row := q.db.QueryRow(ctx, getApplicantByEmail, email)
+	var i Applicant
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.GithubLink,
+		&i.LinkedinLink,
+		&i.ResumePdf,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getApplicantById = `-- name: GetApplicantById :one
+SELECT id, first_name, last_name, email, github_link, linkedin_link, resume_pdf, created_at FROM applicants
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetApplicantById(ctx context.Context, id pgtype.UUID) (Applicant, error) {
+	row := q.db.QueryRow(ctx, getApplicantById, id)
+	var i Applicant
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.GithubLink,
+		&i.LinkedinLink,
+		&i.ResumePdf,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getApplicationById = `-- name: GetApplicationById :one
+SELECT id, applicant_id, job_id, status, generated_quiz, applied_at FROM application
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetApplicationById(ctx context.Context, id pgtype.UUID) (Application, error) {
+	row := q.db.QueryRow(ctx, getApplicationById, id)
+	var i Application
+	err := row.Scan(
+		&i.ID,
+		&i.ApplicantID,
+		&i.JobID,
+		&i.Status,
+		&i.GeneratedQuiz,
+		&i.AppliedAt,
+	)
+	return i, err
+}
+
+const getJobById = `-- name: GetJobById :one
+SELECT id, title, description, role, category_id, requirements, location, job_type, status, created_by, created_at FROM jobs
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetJobById(ctx context.Context, id pgtype.UUID) (Job, error) {
+	row := q.db.QueryRow(ctx, getJobById, id)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.Role,
+		&i.CategoryID,
+		&i.Requirements,
+		&i.Location,
+		&i.JobType,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getJobCategoryById = `-- name: GetJobCategoryById :one
+SELECT id, name, description, created_at FROM job_categories
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetJobCategoryById(ctx context.Context, id pgtype.UUID) (JobCategory, error) {
+	row := q.db.QueryRow(ctx, getJobCategoryById, id)
+	var i JobCategory
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getMatchingTalentsForJob = `-- name: GetMatchingTalentsForJob :many
+SELECT DISTINCT
+    u.id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.github_username,
+    u.avatar_url,
+    u.bio,
+    u.location,
+    u.tech_stack,
+    u.experience_level,
+    u.availability_status,
+    u.talent_status,
+    COUNT(DISTINCT r.id) as repositories_count,
+    COALESCE(SUM(r.stars), 0) as total_stars
+FROM users u
+LEFT JOIN repositories r ON r.user_id = u.id
+WHERE u.role = 'applicant'
+    AND u.availability_status IN ('Available', 'Open to Opportunities')
+    AND u.talent_status = 'Active'
+    AND u.tech_stack IS NOT NULL
+GROUP BY u.id, u.first_name, u.last_name, u.email, u.github_username, u.avatar_url, u.bio, u.location, u.tech_stack, u.experience_level, u.availability_status, u.talent_status
+HAVING u.tech_stack ?| (
+    SELECT ARRAY(SELECT jsonb_object_keys(tech_stack) FROM jobs WHERE jobs.id = $1)
+)
+ORDER BY total_stars DESC
+LIMIT $2
+OFFSET $3
+`
+
+type GetMatchingTalentsForJobParams struct {
+	ID     pgtype.UUID
+	Limit  int32
+	Offset int32
+}
+
+type GetMatchingTalentsForJobRow struct {
+	ID                 pgtype.UUID
+	FirstName          string
+	LastName           string
+	Email              string
+	GithubUsername     pgtype.Text
+	AvatarUrl          pgtype.Text
+	Bio                pgtype.Text
+	Location           pgtype.Text
+	TechStack          []byte
+	ExperienceLevel    pgtype.Text
+	AvailabilityStatus pgtype.Text
+	TalentStatus       pgtype.Text
+	RepositoriesCount  int64
+	TotalStars         interface{}
+}
+
+func (q *Queries) GetMatchingTalentsForJob(ctx context.Context, arg GetMatchingTalentsForJobParams) ([]GetMatchingTalentsForJobRow, error) {
+	rows, err := q.db.Query(ctx, getMatchingTalentsForJob, arg.ID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetMatchingTalentsForJobRow
+	for rows.Next() {
+		var i GetMatchingTalentsForJobRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FirstName,
+			&i.LastName,
+			&i.Email,
+			&i.GithubUsername,
+			&i.AvatarUrl,
+			&i.Bio,
+			&i.Location,
+			&i.TechStack,
+			&i.ExperienceLevel,
+			&i.AvailabilityStatus,
+			&i.TalentStatus,
+			&i.RepositoriesCount,
+			&i.TotalStars,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getQuizByApplicationId = `-- name: GetQuizByApplicationId :one
+SELECT id, application_id, questions, created_at FROM quiz
+WHERE application_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetQuizByApplicationId(ctx context.Context, applicationID pgtype.UUID) (Quiz, error) {
+	row := q.db.QueryRow(ctx, getQuizByApplicationId, applicationID)
+	var i Quiz
+	err := row.Scan(
+		&i.ID,
+		&i.ApplicationID,
+		&i.Questions,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getQuizById = `-- name: GetQuizById :one
+SELECT id, application_id, questions, created_at FROM quiz
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetQuizById(ctx context.Context, id pgtype.UUID) (Quiz, error) {
+	row := q.db.QueryRow(ctx, getQuizById, id)
+	var i Quiz
+	err := row.Scan(
+		&i.ID,
+		&i.ApplicationID,
+		&i.Questions,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRepositoriesByUserId = `-- name: GetRepositoriesByUserId :many
+SELECT id, user_id, github_repo_id, name, full_name, description, url, html_url, language, languages, readme_content, readme_html, tech_stack, stars, forks, is_private, created_at, updated_at FROM repositories 
+WHERE user_id = $1 
+ORDER BY updated_at DESC
+`
+
+func (q *Queries) GetRepositoriesByUserId(ctx context.Context, userID pgtype.UUID) ([]Repository, error) {
+	rows, err := q.db.Query(ctx, getRepositoriesByUserId, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Repository
+	for rows.Next() {
+		var i Repository
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.GithubRepoID,
+			&i.Name,
+			&i.FullName,
+			&i.Description,
+			&i.Url,
+			&i.HtmlUrl,
+			&i.Language,
+			&i.Languages,
+			&i.ReadmeContent,
+			&i.ReadmeHtml,
+			&i.TechStack,
+			&i.Stars,
+			&i.Forks,
+			&i.IsPrivate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getRepositoryByGithubID = `-- name: GetRepositoryByGithubID :one
+SELECT id, user_id, github_repo_id, name, full_name, description, url, html_url, language, languages, readme_content, readme_html, tech_stack, stars, forks, is_private, created_at, updated_at FROM repositories WHERE github_repo_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetRepositoryByGithubID(ctx context.Context, githubRepoID int64) (Repository, error) {
+	row := q.db.QueryRow(ctx, getRepositoryByGithubID, githubRepoID)
+	var i Repository
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.GithubRepoID,
+		&i.Name,
+		&i.FullName,
+		&i.Description,
+		&i.Url,
+		&i.HtmlUrl,
+		&i.Language,
+		&i.Languages,
+		&i.ReadmeContent,
+		&i.ReadmeHtml,
+		&i.TechStack,
+		&i.Stars,
+		&i.Forks,
+		&i.IsPrivate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getTalentApplications = `-- name: GetTalentApplications :many
+SELECT 
+    a.id, a.applicant_id, a.job_id, a.status, a.generated_quiz, a.applied_at,
+    j.title as job_title,
+    j.role as job_role
+FROM application a
+JOIN jobs j ON j.id = a.job_id
+WHERE a.applicant_id = $1
+ORDER BY a.applied_at DESC
+`
+
+type GetTalentApplicationsRow struct {
+	ID            pgtype.UUID
+	ApplicantID   pgtype.UUID
+	JobID         pgtype.UUID
+	Status        ApplicationStatus
+	GeneratedQuiz uuid.UUID
+	AppliedAt     pgtype.Timestamp
+	JobTitle      string
+	JobRole       JobRoles
+}
+
+func (q *Queries) GetTalentApplications(ctx context.Context, applicantID pgtype.UUID) ([]GetTalentApplicationsRow, error) {
+	rows, err := q.db.Query(ctx, getTalentApplications, applicantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTalentApplicationsRow
+	for rows.Next() {
+		var i GetTalentApplicationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ApplicantID,
+			&i.JobID,
+			&i.Status,
+			&i.GeneratedQuiz,
+			&i.AppliedAt,
+			&i.JobTitle,
+			&i.JobRole,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTalentById = `-- name: GetTalentById :one
+SELECT 
+    u.id, u.first_name, u.last_name, u.email, u.password, u.github_username, u.github_id, u.avatar_url, u.github_access_token, u.bio, u.location, u.company, u.blog, u.tech_stack, u.talent_status, u.availability_status, u.experience_level, u.role, u.auth_provider, u.last_active_at, u.created_at, u.updated_at,
+    COUNT(DISTINCT r.id) as repositories_count,
+    COALESCE(SUM(r.stars), 0) as total_stars
+FROM users u
+LEFT JOIN repositories r ON r.user_id = u.id
+WHERE u.id = $1 AND u.role = 'applicant'
+GROUP BY u.id
+`
+
+type GetTalentByIdRow struct {
+	ID                 pgtype.UUID
+	FirstName          string
+	LastName           string
+	Email              string
+	Password           pgtype.Text
+	GithubUsername     pgtype.Text
+	GithubID           pgtype.Int8
+	AvatarUrl          pgtype.Text
+	GithubAccessToken  pgtype.Text
+	Bio                pgtype.Text
+	Location           pgtype.Text
+	Company            pgtype.Text
+	Blog               pgtype.Text
+	TechStack          []byte
+	TalentStatus       pgtype.Text
+	AvailabilityStatus pgtype.Text
+	ExperienceLevel    pgtype.Text
+	Role               pgtype.Text
+	AuthProvider       pgtype.Text
+	LastActiveAt       pgtype.Timestamp
+	CreatedAt          pgtype.Timestamp
+	UpdatedAt          pgtype.Timestamp
+	RepositoriesCount  int64
+	TotalStars         interface{}
+}
+
+func (q *Queries) GetTalentById(ctx context.Context, id pgtype.UUID) (GetTalentByIdRow, error) {
+	row := q.db.QueryRow(ctx, getTalentById, id)
+	var i GetTalentByIdRow
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Password,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.AvatarUrl,
+		&i.GithubAccessToken,
+		&i.Bio,
+		&i.Location,
+		&i.Company,
+		&i.Blog,
+		&i.TechStack,
+		&i.TalentStatus,
+		&i.AvailabilityStatus,
+		&i.ExperienceLevel,
+		&i.Role,
+		&i.AuthProvider,
+		&i.LastActiveAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RepositoriesCount,
+		&i.TotalStars,
+	)
+	return i, err
+}
+
+const getTalentPoolEntry = `-- name: GetTalentPoolEntry :one
+SELECT id, user_id, status, tags, notes, rating, last_contacted_at, last_applied_at, total_applications, accepted_jobs, created_at, updated_at FROM talent_pool WHERE user_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetTalentPoolEntry(ctx context.Context, userID pgtype.UUID) (TalentPool, error) {
+	row := q.db.QueryRow(ctx, getTalentPoolEntry, userID)
+	var i TalentPool
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Tags,
+		&i.Notes,
+		&i.Rating,
+		&i.LastContactedAt,
+		&i.LastAppliedAt,
+		&i.TotalApplications,
+		&i.AcceptedJobs,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, first_name, last_name, email, password, github_username, github_id, avatar_url, github_access_token, bio, location, company, blog, tech_stack, talent_status, availability_status, experience_level, role, auth_provider, last_active_at, created_at, updated_at FROM users
+WHERE email = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Password,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.AvatarUrl,
+		&i.GithubAccessToken,
+		&i.Bio,
+		&i.Location,
+		&i.Company,
+		&i.Blog,
+		&i.TechStack,
+		&i.TalentStatus,
+		&i.AvailabilityStatus,
+		&i.ExperienceLevel,
+		&i.Role,
+		&i.AuthProvider,
+		&i.LastActiveAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByGithubID = `-- name: GetUserByGithubID :one
+SELECT id, first_name, last_name, email, password, github_username, github_id, avatar_url, github_access_token, bio, location, company, blog, tech_stack, talent_status, availability_status, experience_level, role, auth_provider, last_active_at, created_at, updated_at FROM users WHERE github_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserByGithubID(ctx context.Context, githubID pgtype.Int8) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByGithubID, githubID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Password,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.AvatarUrl,
+		&i.GithubAccessToken,
+		&i.Bio,
+		&i.Location,
+		&i.Company,
+		&i.Blog,
+		&i.TechStack,
+		&i.TalentStatus,
+		&i.AvailabilityStatus,
+		&i.ExperienceLevel,
+		&i.Role,
+		&i.AuthProvider,
+		&i.LastActiveAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByGithubUsername = `-- name: GetUserByGithubUsername :one
+SELECT id, first_name, last_name, email, password, github_username, github_id, avatar_url, github_access_token, bio, location, company, blog, tech_stack, talent_status, availability_status, experience_level, role, auth_provider, last_active_at, created_at, updated_at FROM users WHERE github_username = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserByGithubUsername(ctx context.Context, githubUsername pgtype.Text) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByGithubUsername, githubUsername)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Password,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.AvatarUrl,
+		&i.GithubAccessToken,
+		&i.Bio,
+		&i.Location,
+		&i.Company,
+		&i.Blog,
+		&i.TechStack,
+		&i.TalentStatus,
+		&i.AvailabilityStatus,
+		&i.ExperienceLevel,
+		&i.Role,
+		&i.AuthProvider,
+		&i.LastActiveAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserById = `-- name: GetUserById :one
+SELECT id, first_name, last_name, email, password, github_username, github_id, avatar_url, github_access_token, bio, location, company, blog, tech_stack, talent_status, availability_status, experience_level, role, auth_provider, last_active_at, created_at, updated_at FROM users
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserById(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserById, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Password,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.AvatarUrl,
+		&i.GithubAccessToken,
+		&i.Bio,
+		&i.Location,
+		&i.Company,
+		&i.Blog,
+		&i.TechStack,
+		&i.TalentStatus,
+		&i.AvailabilityStatus,
+		&i.ExperienceLevel,
+		&i.Role,
+		&i.AuthProvider,
+		&i.LastActiveAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listApplicants = `-- name: ListApplicants :many
+SELECT id, first_name, last_name, email, github_link, linkedin_link, resume_pdf, created_at FROM applicants
+ORDER BY created_at DESC
+LIMIT $1
+OFFSET $2
+`
+
+type ListApplicantsParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListApplicants(ctx context.Context, arg ListApplicantsParams) ([]Applicant, error) {
+	rows, err := q.db.Query(ctx, listApplicants, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Applicant
+	for rows.Next() {
+		var i Applicant
+		if err := rows.Scan(
+			&i.ID,
+			&i.FirstName,
+			&i.LastName,
+			&i.Email,
+			&i.GithubLink,
+			&i.LinkedinLink,
+			&i.ResumePdf,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listApplications = `-- name: ListApplications :many
+SELECT id, applicant_id, job_id, status, generated_quiz, applied_at FROM application
+ORDER BY applied_at DESC
+LIMIT $1
+OFFSET $2
+`
+
+type ListApplicationsParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListApplications(ctx context.Context, arg ListApplicationsParams) ([]Application, error) {
+	rows, err := q.db.Query(ctx, listApplications, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Application
+	for rows.Next() {
+		var i Application
+		if err := rows.Scan(
+			&i.ID,
+			&i.ApplicantID,
+			&i.JobID,
+			&i.Status,
+			&i.GeneratedQuiz,
+			&i.AppliedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listApplicationsByApplicant = `-- name: ListApplicationsByApplicant :many
+SELECT id, applicant_id, job_id, status, generated_quiz, applied_at FROM application
+WHERE applicant_id = $1
+ORDER BY applied_at DESC
+LIMIT $2
+OFFSET $3
+`
+
+type ListApplicationsByApplicantParams struct {
+	ApplicantID pgtype.UUID
+	Limit       int32
+	Offset      int32
+}
+
+func (q *Queries) ListApplicationsByApplicant(ctx context.Context, arg ListApplicationsByApplicantParams) ([]Application, error) {
+	rows, err := q.db.Query(ctx, listApplicationsByApplicant, arg.ApplicantID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Application
+	for rows.Next() {
+		var i Application
+		if err := rows.Scan(
+			&i.ID,
+			&i.ApplicantID,
+			&i.JobID,
+			&i.Status,
+			&i.GeneratedQuiz,
+			&i.AppliedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listApplicationsByJob = `-- name: ListApplicationsByJob :many
+SELECT id, applicant_id, job_id, status, generated_quiz, applied_at FROM application
+WHERE job_id = $1
+ORDER BY applied_at DESC
+LIMIT $2
+OFFSET $3
+`
+
+type ListApplicationsByJobParams struct {
+	JobID  pgtype.UUID
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListApplicationsByJob(ctx context.Context, arg ListApplicationsByJobParams) ([]Application, error) {
+	rows, err := q.db.Query(ctx, listApplicationsByJob, arg.JobID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Application
+	for rows.Next() {
+		var i Application
+		if err := rows.Scan(
+			&i.ID,
+			&i.ApplicantID,
+			&i.JobID,
+			&i.Status,
+			&i.GeneratedQuiz,
+			&i.AppliedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listApplicationsByStatus = `-- name: ListApplicationsByStatus :many
+SELECT id, applicant_id, job_id, status, generated_quiz, applied_at FROM application
+WHERE status = $1
+ORDER BY applied_at DESC
+LIMIT $2
+OFFSET $3
+`
+
+type ListApplicationsByStatusParams struct {
+	Status ApplicationStatus
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListApplicationsByStatus(ctx context.Context, arg ListApplicationsByStatusParams) ([]Application, error) {
+	rows, err := q.db.Query(ctx, listApplicationsByStatus, arg.Status, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Application
+	for rows.Next() {
+		var i Application
+		if err := rows.Scan(
+			&i.ID,
+			&i.ApplicantID,
+			&i.JobID,
+			&i.Status,
+			&i.GeneratedQuiz,
+			&i.AppliedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobCategories = `-- name: ListJobCategories :many
+SELECT id, name, description, created_at FROM job_categories
+ORDER BY name
+LIMIT $1
+OFFSET $2
+`
+
+type ListJobCategoriesParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListJobCategories(ctx context.Context, arg ListJobCategoriesParams) ([]JobCategory, error) {
+	rows, err := q.db.Query(ctx, listJobCategories, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []JobCategory
+	for rows.Next() {
+		var i JobCategory
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobs = `-- name: ListJobs :many
+SELECT id, title, description, role, category_id, requirements, location, job_type, status, created_by, created_at FROM jobs
+ORDER BY created_at DESC
+LIMIT $1
+OFFSET $2
+`
+
+type ListJobsParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, listJobs, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Description,
+			&i.Role,
+			&i.CategoryID,
+			&i.Requirements,
+			&i.Location,
+			&i.JobType,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsByCategory = `-- name: ListJobsByCategory :many
+SELECT id, title, description, role, category_id, requirements, location, job_type, status, created_by, created_at FROM jobs
+WHERE category_id = $1
+ORDER BY created_at DESC
+LIMIT $2
+OFFSET $3
+`
+
+type ListJobsByCategoryParams struct {
+	CategoryID pgtype.UUID
+	Limit      int32
+	Offset     int32
+}
+
+func (q *Queries) ListJobsByCategory(ctx context.Context, arg ListJobsByCategoryParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, listJobsByCategory, arg.CategoryID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Description,
+			&i.Role,
+			&i.CategoryID,
+			&i.Requirements,
+			&i.Location,
+			&i.JobType,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobsByStatus = `-- name: ListJobsByStatus :many
+SELECT id, title, description, role, category_id, requirements, location, job_type, status, created_by, created_at FROM jobs
+WHERE status = $1
+ORDER BY created_at DESC
+LIMIT $2
+OFFSET $3
+`
+
+type ListJobsByStatusParams struct {
+	Status JobStatus
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, listJobsByStatus, arg.Status, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Description,
+			&i.Role,
+			&i.CategoryID,
+			&i.Requirements,
+			&i.Location,
+			&i.JobType,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQuizzes = `-- name: ListQuizzes :many
+SELECT id, application_id, questions, created_at FROM quiz
+ORDER BY created_at DESC
+LIMIT $1
+OFFSET $2
+`
+
+type ListQuizzesParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListQuizzes(ctx context.Context, arg ListQuizzesParams) ([]Quiz, error) {
+	rows, err := q.db.Query(ctx, listQuizzes, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Quiz
+	for rows.Next() {
+		var i Quiz
+		if err := rows.Scan(
+			&i.ID,
+			&i.ApplicationID,
+			&i.Questions,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUsers = `-- name: ListUsers :many
@@ -135,4 +1538,536 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 		return nil, err
 	}
 	return items, nil
+}
+
+const searchTalents = `-- name: SearchTalents :many
+SELECT 
+    u.id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.github_username,
+    u.avatar_url,
+    u.bio,
+    u.location,
+    u.tech_stack,
+    u.experience_level,
+    u.availability_status,
+    u.talent_status,
+    COUNT(DISTINCT r.id) as repositories_count,
+    COALESCE(SUM(r.stars), 0) as total_stars,
+    COUNT(DISTINCT a.id) as total_applications,
+    COUNT(DISTINCT CASE WHEN a.status = 'Accepted' THEN a.id END) as accepted_jobs
+FROM users u
+LEFT JOIN repositories r ON r.user_id = u.id
+LEFT JOIN application a ON a.applicant_id = u.id
+WHERE u.role = 'applicant'
+    AND ($1::text IS NULL OR u.talent_status = $1)
+    AND ($2::text IS NULL OR u.availability_status = $2)
+    AND ($3::text IS NULL OR u.experience_level = $3)
+    AND ($4::text IS NULL OR u.location ILIKE '%' || $4 || '%')
+    AND ($5::jsonb IS NULL OR u.tech_stack @> $5)
+GROUP BY u.id
+ORDER BY total_stars DESC, repositories_count DESC
+LIMIT $6
+OFFSET $7
+`
+
+type SearchTalentsParams struct {
+	Column1 string
+	Column2 string
+	Column3 string
+	Column4 string
+	Column5 []byte
+	Limit   int32
+	Offset  int32
+}
+
+type SearchTalentsRow struct {
+	ID                 pgtype.UUID
+	FirstName          string
+	LastName           string
+	Email              string
+	GithubUsername     pgtype.Text
+	AvatarUrl          pgtype.Text
+	Bio                pgtype.Text
+	Location           pgtype.Text
+	TechStack          []byte
+	ExperienceLevel    pgtype.Text
+	AvailabilityStatus pgtype.Text
+	TalentStatus       pgtype.Text
+	RepositoriesCount  int64
+	TotalStars         interface{}
+	TotalApplications  int64
+	AcceptedJobs       int64
+}
+
+// Talent Pool Queries
+func (q *Queries) SearchTalents(ctx context.Context, arg SearchTalentsParams) ([]SearchTalentsRow, error) {
+	rows, err := q.db.Query(ctx, searchTalents,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchTalentsRow
+	for rows.Next() {
+		var i SearchTalentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FirstName,
+			&i.LastName,
+			&i.Email,
+			&i.GithubUsername,
+			&i.AvatarUrl,
+			&i.Bio,
+			&i.Location,
+			&i.TechStack,
+			&i.ExperienceLevel,
+			&i.AvailabilityStatus,
+			&i.TalentStatus,
+			&i.RepositoriesCount,
+			&i.TotalStars,
+			&i.TotalApplications,
+			&i.AcceptedJobs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateApplicant = `-- name: UpdateApplicant :one
+UPDATE applicants
+SET first_name = $2, last_name = $3, github_link = $4, linkedin_link = $5, resume_pdf = $6
+WHERE id = $1
+RETURNING id, first_name, last_name, email, github_link, linkedin_link, resume_pdf, created_at
+`
+
+type UpdateApplicantParams struct {
+	ID           pgtype.UUID
+	FirstName    string
+	LastName     string
+	GithubLink   pgtype.Text
+	LinkedinLink pgtype.Text
+	ResumePdf    string
+}
+
+func (q *Queries) UpdateApplicant(ctx context.Context, arg UpdateApplicantParams) (Applicant, error) {
+	row := q.db.QueryRow(ctx, updateApplicant,
+		arg.ID,
+		arg.FirstName,
+		arg.LastName,
+		arg.GithubLink,
+		arg.LinkedinLink,
+		arg.ResumePdf,
+	)
+	var i Applicant
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.GithubLink,
+		&i.LinkedinLink,
+		&i.ResumePdf,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateApplicationStatus = `-- name: UpdateApplicationStatus :one
+UPDATE application
+SET status = $2, generated_quiz = $3
+WHERE id = $1
+RETURNING id, applicant_id, job_id, status, generated_quiz, applied_at
+`
+
+type UpdateApplicationStatusParams struct {
+	ID            pgtype.UUID
+	Status        ApplicationStatus
+	GeneratedQuiz uuid.UUID
+}
+
+func (q *Queries) UpdateApplicationStatus(ctx context.Context, arg UpdateApplicationStatusParams) (Application, error) {
+	row := q.db.QueryRow(ctx, updateApplicationStatus, arg.ID, arg.Status, arg.GeneratedQuiz)
+	var i Application
+	err := row.Scan(
+		&i.ID,
+		&i.ApplicantID,
+		&i.JobID,
+		&i.Status,
+		&i.GeneratedQuiz,
+		&i.AppliedAt,
+	)
+	return i, err
+}
+
+const updateJob = `-- name: UpdateJob :one
+UPDATE jobs
+SET title = $2, description = $3, role = $4, category_id = $5, requirements = $6, location = $7, job_type = $8, status = $9
+WHERE id = $1
+RETURNING id, title, description, role, category_id, requirements, location, job_type, status, created_by, created_at
+`
+
+type UpdateJobParams struct {
+	ID           pgtype.UUID
+	Title        string
+	Description  string
+	Role         JobRoles
+	CategoryID   pgtype.UUID
+	Requirements pgtype.Text
+	Location     pgtype.Text
+	JobType      pgtype.Text
+	Status       JobStatus
+}
+
+func (q *Queries) UpdateJob(ctx context.Context, arg UpdateJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, updateJob,
+		arg.ID,
+		arg.Title,
+		arg.Description,
+		arg.Role,
+		arg.CategoryID,
+		arg.Requirements,
+		arg.Location,
+		arg.JobType,
+		arg.Status,
+	)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.Role,
+		&i.CategoryID,
+		&i.Requirements,
+		&i.Location,
+		&i.JobType,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateJobCategory = `-- name: UpdateJobCategory :one
+UPDATE job_categories
+SET name = $2, description = $3
+WHERE id = $1
+RETURNING id, name, description, created_at
+`
+
+type UpdateJobCategoryParams struct {
+	ID          pgtype.UUID
+	Name        string
+	Description pgtype.Text
+}
+
+func (q *Queries) UpdateJobCategory(ctx context.Context, arg UpdateJobCategoryParams) (JobCategory, error) {
+	row := q.db.QueryRow(ctx, updateJobCategory, arg.ID, arg.Name, arg.Description)
+	var i JobCategory
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateJobStatus = `-- name: UpdateJobStatus :one
+UPDATE jobs
+SET status = $2
+WHERE id = $1
+RETURNING id, title, description, role, category_id, requirements, location, job_type, status, created_by, created_at
+`
+
+type UpdateJobStatusParams struct {
+	ID     pgtype.UUID
+	Status JobStatus
+}
+
+func (q *Queries) UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) (Job, error) {
+	row := q.db.QueryRow(ctx, updateJobStatus, arg.ID, arg.Status)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.Role,
+		&i.CategoryID,
+		&i.Requirements,
+		&i.Location,
+		&i.JobType,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateQuiz = `-- name: UpdateQuiz :one
+UPDATE quiz
+SET questions = $2
+WHERE id = $1
+RETURNING id, application_id, questions, created_at
+`
+
+type UpdateQuizParams struct {
+	ID        pgtype.UUID
+	Questions []byte
+}
+
+func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (Quiz, error) {
+	row := q.db.QueryRow(ctx, updateQuiz, arg.ID, arg.Questions)
+	var i Quiz
+	err := row.Scan(
+		&i.ID,
+		&i.ApplicationID,
+		&i.Questions,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateRepository = `-- name: UpdateRepository :one
+UPDATE repositories
+SET 
+    description = COALESCE($2, description),
+    language = COALESCE($3, language),
+    languages = COALESCE($4, languages),
+    readme_content = COALESCE($5, readme_content),
+    readme_html = COALESCE($6, readme_html),
+    tech_stack = COALESCE($7, tech_stack),
+    stars = COALESCE($8, stars),
+    forks = COALESCE($9, forks),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, user_id, github_repo_id, name, full_name, description, url, html_url, language, languages, readme_content, readme_html, tech_stack, stars, forks, is_private, created_at, updated_at
+`
+
+type UpdateRepositoryParams struct {
+	ID            pgtype.UUID
+	Description   pgtype.Text
+	Language      pgtype.Text
+	Languages     []byte
+	ReadmeContent pgtype.Text
+	ReadmeHtml    pgtype.Text
+	TechStack     []byte
+	Stars         pgtype.Int4
+	Forks         pgtype.Int4
+}
+
+func (q *Queries) UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error) {
+	row := q.db.QueryRow(ctx, updateRepository,
+		arg.ID,
+		arg.Description,
+		arg.Language,
+		arg.Languages,
+		arg.ReadmeContent,
+		arg.ReadmeHtml,
+		arg.TechStack,
+		arg.Stars,
+		arg.Forks,
+	)
+	var i Repository
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.GithubRepoID,
+		&i.Name,
+		&i.FullName,
+		&i.Description,
+		&i.Url,
+		&i.HtmlUrl,
+		&i.Language,
+		&i.Languages,
+		&i.ReadmeContent,
+		&i.ReadmeHtml,
+		&i.TechStack,
+		&i.Stars,
+		&i.Forks,
+		&i.IsPrivate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateTalentPoolEntry = `-- name: UpdateTalentPoolEntry :one
+UPDATE talent_pool
+SET 
+    status = COALESCE($2, status),
+    tags = COALESCE($3, tags),
+    notes = COALESCE($4, notes),
+    rating = COALESCE($5, rating),
+    last_contacted_at = COALESCE($6, last_contacted_at),
+    updated_at = now()
+WHERE user_id = $1
+RETURNING id, user_id, status, tags, notes, rating, last_contacted_at, last_applied_at, total_applications, accepted_jobs, created_at, updated_at
+`
+
+type UpdateTalentPoolEntryParams struct {
+	UserID          pgtype.UUID
+	Status          pgtype.Text
+	Tags            []string
+	Notes           pgtype.Text
+	Rating          pgtype.Int4
+	LastContactedAt pgtype.Timestamp
+}
+
+func (q *Queries) UpdateTalentPoolEntry(ctx context.Context, arg UpdateTalentPoolEntryParams) (TalentPool, error) {
+	row := q.db.QueryRow(ctx, updateTalentPoolEntry,
+		arg.UserID,
+		arg.Status,
+		arg.Tags,
+		arg.Notes,
+		arg.Rating,
+		arg.LastContactedAt,
+	)
+	var i TalentPool
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Tags,
+		&i.Notes,
+		&i.Rating,
+		&i.LastContactedAt,
+		&i.LastAppliedAt,
+		&i.TotalApplications,
+		&i.AcceptedJobs,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateTalentStatus = `-- name: UpdateTalentStatus :one
+UPDATE users
+SET 
+    talent_status = COALESCE($2, talent_status),
+    availability_status = COALESCE($3, availability_status),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, first_name, last_name, email, password, github_username, github_id, avatar_url, github_access_token, bio, location, company, blog, tech_stack, talent_status, availability_status, experience_level, role, auth_provider, last_active_at, created_at, updated_at
+`
+
+type UpdateTalentStatusParams struct {
+	ID                 pgtype.UUID
+	TalentStatus       pgtype.Text
+	AvailabilityStatus pgtype.Text
+}
+
+func (q *Queries) UpdateTalentStatus(ctx context.Context, arg UpdateTalentStatusParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateTalentStatus, arg.ID, arg.TalentStatus, arg.AvailabilityStatus)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Password,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.AvatarUrl,
+		&i.GithubAccessToken,
+		&i.Bio,
+		&i.Location,
+		&i.Company,
+		&i.Blog,
+		&i.TechStack,
+		&i.TalentStatus,
+		&i.AvailabilityStatus,
+		&i.ExperienceLevel,
+		&i.Role,
+		&i.AuthProvider,
+		&i.LastActiveAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateUserGithubData = `-- name: UpdateUserGithubData :one
+UPDATE users
+SET 
+    github_username = COALESCE($2, github_username),
+    avatar_url = COALESCE($3, avatar_url),
+    github_access_token = COALESCE($4, github_access_token),
+    bio = COALESCE($5, bio),
+    location = COALESCE($6, location),
+    company = COALESCE($7, company),
+    blog = COALESCE($8, blog),
+    tech_stack = COALESCE($9, tech_stack),
+    last_active_at = COALESCE($10, last_active_at),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, first_name, last_name, email, password, github_username, github_id, avatar_url, github_access_token, bio, location, company, blog, tech_stack, talent_status, availability_status, experience_level, role, auth_provider, last_active_at, created_at, updated_at
+`
+
+type UpdateUserGithubDataParams struct {
+	ID                pgtype.UUID
+	GithubUsername    pgtype.Text
+	AvatarUrl         pgtype.Text
+	GithubAccessToken pgtype.Text
+	Bio               pgtype.Text
+	Location          pgtype.Text
+	Company           pgtype.Text
+	Blog              pgtype.Text
+	TechStack         []byte
+	LastActiveAt      pgtype.Timestamp
+}
+
+func (q *Queries) UpdateUserGithubData(ctx context.Context, arg UpdateUserGithubDataParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserGithubData,
+		arg.ID,
+		arg.GithubUsername,
+		arg.AvatarUrl,
+		arg.GithubAccessToken,
+		arg.Bio,
+		arg.Location,
+		arg.Company,
+		arg.Blog,
+		arg.TechStack,
+		arg.LastActiveAt,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.Email,
+		&i.Password,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.AvatarUrl,
+		&i.GithubAccessToken,
+		&i.Bio,
+		&i.Location,
+		&i.Company,
+		&i.Blog,
+		&i.TechStack,
+		&i.TalentStatus,
+		&i.AvailabilityStatus,
+		&i.ExperienceLevel,
+		&i.Role,
+		&i.AuthProvider,
+		&i.LastActiveAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
