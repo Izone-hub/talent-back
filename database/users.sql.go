@@ -33,7 +33,7 @@ DO UPDATE SET
     github_token_expires_at = EXCLUDED.github_token_expires_at,
     last_login_at = NOW(),
     updated_at = NOW()
-RETURNING id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at
+RETURNING id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at, public_repos, public_gists, followers, following, hireable, blog, company, location, bio, twitter_username, top_languages, contribution_count
 `
 
 type CreateOrUpdateUserParams struct {
@@ -70,6 +70,18 @@ func (q *Queries) CreateOrUpdateUser(ctx context.Context, arg CreateOrUpdateUser
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicRepos,
+		&i.PublicGists,
+		&i.Followers,
+		&i.Following,
+		&i.Hireable,
+		&i.Blog,
+		&i.Company,
+		&i.Location,
+		&i.Bio,
+		&i.TwitterUsername,
+		&i.TopLanguages,
+		&i.ContributionCount,
 	)
 	return i, err
 }
@@ -85,7 +97,7 @@ func (q *Queries) DeleteUser(ctx context.Context, githubID int64) error {
 }
 
 const getAdminUsers = `-- name: GetAdminUsers :many
-SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at FROM users 
+SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at, public_repos, public_gists, followers, following, hireable, blog, company, location, bio, twitter_username, top_languages, contribution_count FROM users 
 WHERE role = 'admin'
 ORDER BY github_username
 `
@@ -112,6 +124,18 @@ func (q *Queries) GetAdminUsers(ctx context.Context) ([]User, error) {
 			&i.LastLoginAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PublicRepos,
+			&i.PublicGists,
+			&i.Followers,
+			&i.Following,
+			&i.Hireable,
+			&i.Blog,
+			&i.Company,
+			&i.Location,
+			&i.Bio,
+			&i.TwitterUsername,
+			&i.TopLanguages,
+			&i.ContributionCount,
 		); err != nil {
 			return nil, err
 		}
@@ -124,7 +148,7 @@ func (q *Queries) GetAdminUsers(ctx context.Context) ([]User, error) {
 }
 
 const getUserByGitHubID = `-- name: GetUserByGitHubID :one
-SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at FROM users 
+SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at, public_repos, public_gists, followers, following, hireable, blog, company, location, bio, twitter_username, top_languages, contribution_count FROM users 
 WHERE github_id = $1 LIMIT 1
 `
 
@@ -144,12 +168,61 @@ func (q *Queries) GetUserByGitHubID(ctx context.Context, githubID int64) (User, 
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicRepos,
+		&i.PublicGists,
+		&i.Followers,
+		&i.Following,
+		&i.Hireable,
+		&i.Blog,
+		&i.Company,
+		&i.Location,
+		&i.Bio,
+		&i.TwitterUsername,
+		&i.TopLanguages,
+		&i.ContributionCount,
+	)
+	return i, err
+}
+
+const getUserByGitHubUsername = `-- name: GetUserByGitHubUsername :one
+SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at, public_repos, public_gists, followers, following, hireable, blog, company, location, bio, twitter_username, top_languages, contribution_count FROM users
+WHERE github_username = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserByGitHubUsername(ctx context.Context, githubUsername string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByGitHubUsername, githubUsername)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.GithubID,
+		&i.GithubUsername,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.Name,
+		&i.Role,
+		&i.GithubAccessToken,
+		&i.GithubTokenExpiresAt,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PublicRepos,
+		&i.PublicGists,
+		&i.Followers,
+		&i.Following,
+		&i.Hireable,
+		&i.Blog,
+		&i.Company,
+		&i.Location,
+		&i.Bio,
+		&i.TwitterUsername,
+		&i.TopLanguages,
+		&i.ContributionCount,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at FROM users 
+SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at, public_repos, public_gists, followers, following, hireable, blog, company, location, bio, twitter_username, top_languages, contribution_count FROM users 
 WHERE id = $1 LIMIT 1
 `
 
@@ -169,6 +242,18 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicRepos,
+		&i.PublicGists,
+		&i.Followers,
+		&i.Following,
+		&i.Hireable,
+		&i.Blog,
+		&i.Company,
+		&i.Location,
+		&i.Bio,
+		&i.TwitterUsername,
+		&i.TopLanguages,
+		&i.ContributionCount,
 	)
 	return i, err
 }
@@ -188,7 +273,7 @@ func (q *Queries) IsUserAdmin(ctx context.Context, githubID int64) (bool, error)
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at FROM users 
+SELECT id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at, public_repos, public_gists, followers, following, hireable, blog, company, location, bio, twitter_username, top_languages, contribution_count FROM users 
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -220,6 +305,18 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.LastLoginAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PublicRepos,
+			&i.PublicGists,
+			&i.Followers,
+			&i.Following,
+			&i.Hireable,
+			&i.Blog,
+			&i.Company,
+			&i.Location,
+			&i.Bio,
+			&i.TwitterUsername,
+			&i.TopLanguages,
+			&i.ContributionCount,
 		); err != nil {
 			return nil, err
 		}
@@ -235,7 +332,7 @@ const updateUserRole = `-- name: UpdateUserRole :one
 UPDATE users 
 SET role = $2, updated_at = NOW()
 WHERE github_id = $1
-RETURNING id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at
+RETURNING id, github_id, github_username, email, avatar_url, name, role, github_access_token, github_token_expires_at, last_login_at, created_at, updated_at, public_repos, public_gists, followers, following, hireable, blog, company, location, bio, twitter_username, top_languages, contribution_count
 `
 
 type UpdateUserRoleParams struct {
@@ -259,6 +356,18 @@ func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) 
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicRepos,
+		&i.PublicGists,
+		&i.Followers,
+		&i.Following,
+		&i.Hireable,
+		&i.Blog,
+		&i.Company,
+		&i.Location,
+		&i.Bio,
+		&i.TwitterUsername,
+		&i.TopLanguages,
+		&i.ContributionCount,
 	)
 	return i, err
 }

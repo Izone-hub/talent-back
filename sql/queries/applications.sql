@@ -98,7 +98,7 @@ SET
 WHERE id = $1 AND user_id = $2 AND status = 'draft'
 RETURNING *;
 
--- name: StartQuiz :one
+-- name: ApplicationStartQuiz :one
 UPDATE job_applications
 SET 
     status = 'quiz_started',
@@ -107,7 +107,7 @@ SET
 WHERE id = $1 AND status = 'submitted'
 RETURNING *;
 
--- name: CompleteQuiz :one
+-- name: ApplicationCompleteQuiz :one
 UPDATE job_applications
 SET 
     status = 'quiz_completed',

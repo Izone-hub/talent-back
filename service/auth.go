@@ -51,8 +51,7 @@ func (s *AuthService) GitHubAuthURL() string {
 		"&scope=user:email"
 }
 
-// HandleGitHubCallback processes GitHub OAuth callback: exchange code, fetch GitHub user,
-// upsert our user (create or update token/last_login), then return JWT and user.
+// HandleGitHubCallback processes GitHub OAuth callback
 func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*AuthResponse, error) {
 	// 1. Exchange code for GitHub access token
 	tokenResponse, err := s.githubService.ExchangeCodeForToken(ctx, code)
@@ -60,22 +59,28 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
 
-	// 2. Get GitHub user info
-	githubUser, err := s.githubService.GetUser(ctx, tokenResponse.AccessToken)
+	// 2. Get GitHub user info AND repositories using the new method
+	githubUser, repos, err := s.githubService.GetUserWithDetails(ctx, tokenResponse.AccessToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get GitHub user: %w", err)
 	}
 
-	// 3. Upsert user (insert or update on conflict). SQL sets last_login_at = NOW() and updates token.
-	dbUser, err := s.upsertUserFromGitHub(ctx, githubUser, tokenResponse)
+	// 3. Calculate top languages from repositories
+	topLanguages := s.githubService.CalculateTopLanguages(repos)
+
+	// 4. Upsert user with ALL GitHub data (including repos and languages)
+	dbUser, err := s.upsertUserFromGitHub(ctx, githubUser, tokenResponse, topLanguages)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert user: %w", err)
 	}
 
-	// 4. If user is in admin list but not yet admin, promote (e.g. config changed or new user defaulted to 'user')
+	// 5. If user is in admin list but not yet admin, promote
 	for _, admin := range s.config.GetAdminUsernames() {
 		if admin == githubUser.Login && dbUser.Role != "admin" {
-			dbUser, err = s.queries.UpdateUserRole(ctx, database.UpdateUserRoleParams{GithubID: githubUser.ID, Role: "admin"})
+			dbUser, err = s.queries.UpdateUserRole(ctx, database.UpdateUserRoleParams{
+				GithubID: githubUser.ID,
+				Role:     "admin",
+			})
 			if err != nil {
 				return nil, fmt.Errorf("failed to update user role: %w", err)
 			}
@@ -85,7 +90,7 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 
 	user := dbUserToModel(dbUser)
 
-	// 5. Generate JWT token
+	// 6. Generate JWT token
 	token, err := s.generateJWT(&user)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
@@ -97,9 +102,11 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 	}, nil
 }
 
-// upsertUserFromGitHub inserts or updates a user from GitHub data (CreateOrUpdateUser upsert).
-func (s *AuthService) upsertUserFromGitHub(ctx context.Context, githubUser *GitHubUser, tokenResponse *GitHubTokenResponse) (database.User, error) {
+// upsertUserFromGitHub creates or updates a user from GitHub OAuth data.
+// Profile fields (public_repos, blog, etc.) are not stored; extend the users schema and use CreateOrUpdateUserWithProfile if needed.
+func (s *AuthService) upsertUserFromGitHub(ctx context.Context, githubUser *GitHubUser, tokenResponse *GitHubTokenResponse, topLanguages []string) (database.User, error) {
 	expiresAt := time.Now().AddDate(1, 0, 0)
+
 	return s.queries.CreateOrUpdateUser(ctx, database.CreateOrUpdateUserParams{
 		GithubID:             githubUser.ID,
 		GithubUsername:       githubUser.Login,
@@ -118,18 +125,18 @@ func dbUserToModel(u database.User) models.User {
 		id, _ = uuid.FromBytes(u.ID.Bytes[:])
 	}
 	return models.User{
-		ID:             id,
-		GithubID:       u.GithubID,
-		GithubUsername: u.GithubUsername,
-		Email:          pgTextToStrPtr(u.Email),
-		AvatarURL:      pgTextToStrPtr(u.AvatarUrl),
-		Name:           pgTextToStrPtr(u.Name),
-		Role:           u.Role,
-		GithubAccessToken: pgTextToString(u.GithubAccessToken),
+		ID:                   id,
+		GithubID:             u.GithubID,
+		GithubUsername:       u.GithubUsername,
+		Email:                pgTextToStrPtr(u.Email),
+		AvatarURL:            pgTextToStrPtr(u.AvatarUrl),
+		Name:                 pgTextToStrPtr(u.Name),
+		Role:                 u.Role,
+		GithubAccessToken:    pgTextToString(u.GithubAccessToken),
 		GithubTokenExpiresAt: pgTimestampToTimePtr(u.GithubTokenExpiresAt),
-		LastLoginAt:   pgTimestampToTime(u.LastLoginAt),
-		CreatedAt:     pgTimestampToTime(u.CreatedAt),
-		UpdatedAt:     pgTimestampToTime(u.UpdatedAt),
+		LastLoginAt:          pgTimestampToTime(u.LastLoginAt),
+		CreatedAt:            pgTimestampToTime(u.CreatedAt),
+		UpdatedAt:            pgTimestampToTime(u.UpdatedAt),
 	}
 }
 

@@ -19,38 +19,50 @@ type User struct {
 	LastLoginAt          time.Time  `json:"last_login_at" db:"last_login_at"`
 	CreatedAt            time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at" db:"updated_at"`
+
+	// New developer fields
+	PublicRepos       int      `json:"public_repos" db:"public_repos"`
+	PublicGists       int      `json:"public_gists" db:"public_gists"`
+	Followers         int      `json:"followers" db:"followers"`
+	Following         int      `json:"following" db:"following"`
+	Hireable          bool     `json:"hireable" db:"hireable"`
+	Blog              *string  `json:"blog,omitempty" db:"blog"`
+	Company           *string  `json:"company,omitempty" db:"company"`
+	Location          *string  `json:"location,omitempty" db:"location"`
+	Bio               *string  `json:"bio,omitempty" db:"bio"`
+	TwitterUsername   *string  `json:"twitter_username,omitempty" db:"twitter_username"`
+	TopLanguages      []string `json:"top_languages" db:"top_languages"`
+	ContributionCount int      `json:"contribution_count" db:"contribution_count"`
 }
 
 func (u *User) IsAdmin() bool {
 	return u.Role == "admin"
 }
 
-func (u *User) SanitizedUser() map[string]interface{} {
-	return map[string]interface{}{
-		"id":              u.ID,
-		"github_id":       u.GithubID,
-		"github_username": u.GithubUsername,
-		"email":           u.Email,
-		"avatar_url":      u.AvatarURL,
-		"name":            u.Name,
-		"role":            u.Role,
-		"last_login_at":   u.LastLoginAt,
-		"created_at":      u.CreatedAt,
-	}
-}
-
-// ToResponse returns a copy of the user safe for API responses (same struct; sensitive fields use json:"-" so are omitted).
+// ToResponse returns a copy of the user safe for API responses
 func (u *User) ToResponse() User {
 	return User{
-		ID:             u.ID,
-		GithubID:       u.GithubID,
-		GithubUsername: u.GithubUsername,
-		Email:          u.Email,
-		AvatarURL:      u.AvatarURL,
-		Name:           u.Name,
-		Role:           u.Role,
-		LastLoginAt:    u.LastLoginAt,
-		CreatedAt:      u.CreatedAt,
-		UpdatedAt:      u.UpdatedAt,
+		ID:                u.ID,
+		GithubID:          u.GithubID,
+		GithubUsername:    u.GithubUsername,
+		Email:             u.Email,
+		AvatarURL:         u.AvatarURL,
+		Name:              u.Name,
+		Role:              u.Role,
+		LastLoginAt:       u.LastLoginAt,
+		CreatedAt:         u.CreatedAt,
+		UpdatedAt:         u.UpdatedAt,
+		PublicRepos:       u.PublicRepos,
+		PublicGists:       u.PublicGists,
+		Followers:         u.Followers,
+		Following:         u.Following,
+		Hireable:          u.Hireable,
+		Blog:              u.Blog,
+		Company:           u.Company,
+		Location:          u.Location,
+		Bio:               u.Bio,
+		TwitterUsername:   u.TwitterUsername,
+		TopLanguages:      u.TopLanguages,
+		ContributionCount: u.ContributionCount,
 	}
 }

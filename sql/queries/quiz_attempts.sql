@@ -163,8 +163,8 @@ SELECT
     qa.*,
     j.title as job_title,
     j.company as job_company,
-    qr.score,
-    qr.passed,
+    qa.score,
+    qa.passed,
     qr.strengths,
     qr.weaknesses
 FROM quiz_attempts qa

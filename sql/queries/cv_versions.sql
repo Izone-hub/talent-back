@@ -66,12 +66,12 @@ DELETE FROM cv_versions
 WHERE id = $1 AND user_id = $2;
 
 -- name: DeleteOldCVs :exec
-DELETE FROM cv_versions
-WHERE user_id = $1 
-AND id NOT IN (
-    SELECT id FROM cv_versions 
-    WHERE user_id = $1 
-    ORDER BY version DESC 
+DELETE FROM cv_versions c
+WHERE c.user_id = $1
+AND c.id NOT IN (
+    SELECT id FROM cv_versions
+    WHERE user_id = $1
+    ORDER BY version DESC
     LIMIT 5  -- Keep last 5 versions
 );
 

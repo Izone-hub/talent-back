@@ -135,7 +135,6 @@ DELETE FROM audit_logs
 WHERE marked_for_deletion = true
 AND performed_at < NOW() - interval '30 days';
 
--- name: ArchiveOldLogs :exec
-INSERT INTO audit_logs_archive
-SELECT * FROM audit_logs
+-- name: DeleteOldLogs :exec
+DELETE FROM audit_logs
 WHERE performed_at < NOW() - interval '1 year';
