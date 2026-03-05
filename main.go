@@ -36,16 +36,18 @@ func main() {
 	// Initialize services
 	githubService := service.NewGithubService(&cfg)
 	authService := service.NewAuthService(&cfg, githubService, db)
+	jobService := service.NewJobService(db)
 
 	// Initialize controllers
 	authController := controller.NewAuthController(authService)
+	jobController := controller.NewJobController(jobService)
 
 	// Initialize middleware
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 
 	// Initialize router
-	r := router.NewRouter(authController, authMiddleware)
-	handler := r.Initialize()
+	r := router.NewRouter(authController, jobController, authMiddleware)
+	handler := r
 
 	// Start server
 	serverAddr := ":" + cfg.Port

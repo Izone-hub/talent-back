@@ -7,40 +7,20 @@ import (
 	"github.com/Izone-hub/talent-backend/middleware"
 )
 
-type Router struct {
-	authController *controller.AuthController
-	authMiddleware *middleware.AuthMiddleware
-}
-
+// NewRouter creates the top-level HTTP handler.
+// It mounts versioned route groups under their respective prefixes.
 func NewRouter(
 	authController *controller.AuthController,
+	jobController *controller.JobController,
 	authMiddleware *middleware.AuthMiddleware,
-) *Router {
-	return &Router{
-		authController: authController,
-		authMiddleware: authMiddleware,
-	}
-}
+) http.Handler {
 
-func (r *Router) Initialize() http.Handler {
 	mux := http.NewServeMux()
 
-	// Auth routes
-	mux.HandleFunc("GET /api/auth/github/login", r.authController.GitHubLogin)
-	mux.HandleFunc("GET /api/auth/github/callback", r.authController.GitHubCallback)
-
-	// Protected routes
-	mux.HandleFunc("GET /api/auth/me", r.authMiddleware.Authenticate(r.authController.GetCurrentUser))
-
-	// Example admin route
-	mux.HandleFunc("GET /api/admin/dashboard",
-		r.authMiddleware.Authenticate(
-			r.authMiddleware.RequireAdmin(
-				func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte("Admin Dashboard"))
-				},
-			),
-		),
+	// Mount v1 routes under /api/v1/
+	mux.Handle(
+		"/api/v1/",
+		http.StripPrefix("/api/v1", V1Routes(authController, jobController, authMiddleware)),
 	)
 
 	return mux
