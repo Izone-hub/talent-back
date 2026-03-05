@@ -2,60 +2,57 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/Izone-hub/talent-backend/config"
 	"github.com/Izone-hub/talent-backend/controller"
-	dbConn "github.com/Izone-hub/talent-backend/database"
+	"github.com/Izone-hub/talent-backend/middleware"
 	"github.com/Izone-hub/talent-backend/router"
-	"github.com/gin-gonic/gin"
+	"github.com/Izone-hub/talent-backend/service"
 	"github.com/jackc/pgx/v5"
-	_ "github.com/lib/pq"
 )
-
-var (
-	server *gin.Engine
-	db     *dbConn.Queries
-	ctx    context.Context
-
-	UserController controller.UserController
-	UserRoutes     router.UserRoutes
-)
-
-func init() {
-	ctx = context.TODO()
-	config, err := config.LoadConfig(".")
-
-	if err != nil {
-		log.Fatalf("could not loadconfig: %v", err)
-	}
-
-	conn, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@%s:%s/%s", config.PostgresUser, config.PostgresPassword, config.PostgresHost, config.PostgresPort, config.PostgresDb))
-	if err != nil {
-		log.Fatalf("Could not connect to database: %v", err)
-	}
-
-	db = dbConn.New(conn)
-
-	fmt.Println("PostgreSql connected successfully...")
-
-	UserController = *controller.NewUserController(db, ctx)
-	UserRoutes = router.NewRouteUser(UserController)
-
-	server = gin.Default()
-}
 
 func main() {
+	// Load configuration
+	cfg, err := config.LoadConfig(".")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
 
-	router := server.Group("/api")
+	// Connect to database
+	db, err := pgx.Connect(context.Background(), cfg.GetDatabaseURL())
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close(context.Background())
 
-	UserRoutes.UserRoute(router)
+	// Test database connection
+	if err := db.Ping(context.Background()); err != nil {
+		log.Fatalf("Failed to ping database: %v", err)
+	}
+	log.Println("Connected to database successfully")
 
-	server.NoRoute(func(ctx *gin.Context) {
-		ctx.JSON(http.StatusNotFound, gin.H{"status": "failed", "message": fmt.Sprintf("The specified route %s not found", ctx.Request.URL)})
-	})
+	// Initialize services
+	githubService := service.NewGithubService(&cfg)
+	authService := service.NewAuthService(&cfg, githubService, db)
+	jobService := service.NewJobService(db)
 
-	log.Fatal(server.Run(":" + "5000"))
+	// Initialize controllers
+	authController := controller.NewAuthController(authService)
+	jobController := controller.NewJobController(jobService)
+
+	// Initialize middleware
+	authMiddleware := middleware.NewAuthMiddleware(authService)
+
+	// Initialize router
+	r := router.NewRouter(authController, jobController, authMiddleware)
+	handler := r
+
+	// Start server
+	serverAddr := ":" + cfg.Port
+	log.Printf("Server starting on %s", serverAddr)
+	if err := http.ListenAndServe(serverAddr, handler); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }

@@ -5,15 +5,683 @@
 package database
 
 import (
+	"database/sql/driver"
+	"fmt"
+	"net/netip"
+
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type User struct {
-	ID        pgtype.UUID
-	FirstName string
-	LastName  string
-	Email     string
-	Password  string
+type ApplicationStatus string
+
+const (
+	ApplicationStatusDraft         ApplicationStatus = "draft"
+	ApplicationStatusSubmitted     ApplicationStatus = "submitted"
+	ApplicationStatusQuizStarted   ApplicationStatus = "quiz_started"
+	ApplicationStatusQuizCompleted ApplicationStatus = "quiz_completed"
+	ApplicationStatusUnderReview   ApplicationStatus = "under_review"
+	ApplicationStatusShortlisted   ApplicationStatus = "shortlisted"
+	ApplicationStatusInterviewed   ApplicationStatus = "interviewed"
+	ApplicationStatusRejected      ApplicationStatus = "rejected"
+	ApplicationStatusAccepted      ApplicationStatus = "accepted"
+	ApplicationStatusWithdrawn     ApplicationStatus = "withdrawn"
+)
+
+func (e *ApplicationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ApplicationStatus(s)
+	case string:
+		*e = ApplicationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ApplicationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullApplicationStatus struct {
+	ApplicationStatus ApplicationStatus
+	Valid             bool // Valid is true if ApplicationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullApplicationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ApplicationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ApplicationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullApplicationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ApplicationStatus), nil
+}
+
+type AuditAction string
+
+const (
+	AuditActionUserLogin                AuditAction = "user_login"
+	AuditActionUserLogout               AuditAction = "user_logout"
+	AuditActionUserRegistered           AuditAction = "user_registered"
+	AuditActionUserUpdated              AuditAction = "user_updated"
+	AuditActionUserDeleted              AuditAction = "user_deleted"
+	AuditActionRoleChanged              AuditAction = "role_changed"
+	AuditActionJobCreated               AuditAction = "job_created"
+	AuditActionJobUpdated               AuditAction = "job_updated"
+	AuditActionJobPublished             AuditAction = "job_published"
+	AuditActionJobClosed                AuditAction = "job_closed"
+	AuditActionJobArchived              AuditAction = "job_archived"
+	AuditActionJobDeleted               AuditAction = "job_deleted"
+	AuditActionApplicationSubmitted     AuditAction = "application_submitted"
+	AuditActionApplicationUpdated       AuditAction = "application_updated"
+	AuditActionApplicationStatusChanged AuditAction = "application_status_changed"
+	AuditActionApplicationWithdrawn     AuditAction = "application_withdrawn"
+	AuditActionQuizStarted              AuditAction = "quiz_started"
+	AuditActionQuizCompleted            AuditAction = "quiz_completed"
+	AuditActionQuizAutoSaved            AuditAction = "quiz_auto_saved"
+	AuditActionQuizTimedOut             AuditAction = "quiz_timed_out"
+	AuditActionCvUploaded               AuditAction = "cv_uploaded"
+	AuditActionCvDeleted                AuditAction = "cv_deleted"
+	AuditActionCvUpdated                AuditAction = "cv_updated"
+	AuditActionAdminLogin               AuditAction = "admin_login"
+	AuditActionAdminAction              AuditAction = "admin_action"
+	AuditActionSettingsChanged          AuditAction = "settings_changed"
+	AuditActionReportGenerated          AuditAction = "report_generated"
+)
+
+func (e *AuditAction) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AuditAction(s)
+	case string:
+		*e = AuditAction(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AuditAction: %T", src)
+	}
+	return nil
+}
+
+type NullAuditAction struct {
+	AuditAction AuditAction
+	Valid       bool // Valid is true if AuditAction is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAuditAction) Scan(value interface{}) error {
+	if value == nil {
+		ns.AuditAction, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AuditAction.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAuditAction) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AuditAction), nil
+}
+
+type JobExperienceLevel string
+
+const (
+	JobExperienceLevelEntry  JobExperienceLevel = "entry"
+	JobExperienceLevelJunior JobExperienceLevel = "junior"
+	JobExperienceLevelMid    JobExperienceLevel = "mid"
+	JobExperienceLevelSenior JobExperienceLevel = "senior"
+	JobExperienceLevelLead   JobExperienceLevel = "lead"
+)
+
+func (e *JobExperienceLevel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = JobExperienceLevel(s)
+	case string:
+		*e = JobExperienceLevel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for JobExperienceLevel: %T", src)
+	}
+	return nil
+}
+
+type NullJobExperienceLevel struct {
+	JobExperienceLevel JobExperienceLevel
+	Valid              bool // Valid is true if JobExperienceLevel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullJobExperienceLevel) Scan(value interface{}) error {
+	if value == nil {
+		ns.JobExperienceLevel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.JobExperienceLevel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullJobExperienceLevel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.JobExperienceLevel), nil
+}
+
+type JobStatus string
+
+const (
+	JobStatusDraft     JobStatus = "draft"
+	JobStatusPublished JobStatus = "published"
+	JobStatusClosed    JobStatus = "closed"
+	JobStatusArchived  JobStatus = "archived"
+)
+
+func (e *JobStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = JobStatus(s)
+	case string:
+		*e = JobStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for JobStatus: %T", src)
+	}
+	return nil
+}
+
+type NullJobStatus struct {
+	JobStatus JobStatus
+	Valid     bool // Valid is true if JobStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullJobStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.JobStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.JobStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullJobStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.JobStatus), nil
+}
+
+type JobType string
+
+const (
+	JobTypeFullTime   JobType = "full-time"
+	JobTypePartTime   JobType = "part-time"
+	JobTypeContract   JobType = "contract"
+	JobTypeFreelance  JobType = "freelance"
+	JobTypeInternship JobType = "internship"
+)
+
+func (e *JobType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = JobType(s)
+	case string:
+		*e = JobType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for JobType: %T", src)
+	}
+	return nil
+}
+
+type NullJobType struct {
+	JobType JobType
+	Valid   bool // Valid is true if JobType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullJobType) Scan(value interface{}) error {
+	if value == nil {
+		ns.JobType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.JobType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullJobType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.JobType), nil
+}
+
+type QuestionDifficulty string
+
+const (
+	QuestionDifficultyEasy   QuestionDifficulty = "easy"
+	QuestionDifficultyMedium QuestionDifficulty = "medium"
+	QuestionDifficultyHard   QuestionDifficulty = "hard"
+	QuestionDifficultyExpert QuestionDifficulty = "expert"
+)
+
+func (e *QuestionDifficulty) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuestionDifficulty(s)
+	case string:
+		*e = QuestionDifficulty(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuestionDifficulty: %T", src)
+	}
+	return nil
+}
+
+type NullQuestionDifficulty struct {
+	QuestionDifficulty QuestionDifficulty
+	Valid              bool // Valid is true if QuestionDifficulty is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuestionDifficulty) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuestionDifficulty, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuestionDifficulty.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuestionDifficulty) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuestionDifficulty), nil
+}
+
+type QuestionType string
+
+const (
+	QuestionTypeMultipleChoice  QuestionType = "multiple_choice"
+	QuestionTypeMultipleSelect  QuestionType = "multiple_select"
+	QuestionTypeText            QuestionType = "text"
+	QuestionTypeTrueFalse       QuestionType = "true_false"
+	QuestionTypeCodingChallenge QuestionType = "coding_challenge"
+)
+
+func (e *QuestionType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuestionType(s)
+	case string:
+		*e = QuestionType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuestionType: %T", src)
+	}
+	return nil
+}
+
+type NullQuestionType struct {
+	QuestionType QuestionType
+	Valid        bool // Valid is true if QuestionType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuestionType) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuestionType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuestionType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuestionType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuestionType), nil
+}
+
+type QuizAttemptStatus string
+
+const (
+	QuizAttemptStatusStarted    QuizAttemptStatus = "started"
+	QuizAttemptStatusInProgress QuizAttemptStatus = "in_progress"
+	QuizAttemptStatusPaused     QuizAttemptStatus = "paused"
+	QuizAttemptStatusCompleted  QuizAttemptStatus = "completed"
+	QuizAttemptStatusTimedOut   QuizAttemptStatus = "timed_out"
+	QuizAttemptStatusAbandoned  QuizAttemptStatus = "abandoned"
+)
+
+func (e *QuizAttemptStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuizAttemptStatus(s)
+	case string:
+		*e = QuizAttemptStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuizAttemptStatus: %T", src)
+	}
+	return nil
+}
+
+type NullQuizAttemptStatus struct {
+	QuizAttemptStatus QuizAttemptStatus
+	Valid             bool // Valid is true if QuizAttemptStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuizAttemptStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuizAttemptStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuizAttemptStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuizAttemptStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuizAttemptStatus), nil
+}
+
+type AdminAuditTrail struct {
+	ID               pgtype.UUID
+	AuditLogID       pgtype.UUID
+	AdminID          pgtype.UUID
+	AdminNotes       pgtype.Text
+	ApprovalRequired pgtype.Bool
+	ApprovedBy       uuid.UUID
+	ApprovedAt       pgtype.Timestamp
+	SensitivityLevel pgtype.Text
+	CreatedAt        pgtype.Timestamp
+}
+
+type AuditExport struct {
+	ID              pgtype.UUID
+	ExportedBy      uuid.UUID
+	ExportType      pgtype.Text
+	DateRangeStart  pgtype.Timestamp
+	DateRangeEnd    pgtype.Timestamp
+	FilterCriteria  []byte
+	FilePath        pgtype.Text
+	ExportedAt      pgtype.Timestamp
+	DownloadedCount pgtype.Int4
+}
+
+type AuditLog struct {
+	ID                pgtype.UUID
+	UserID            uuid.UUID
+	UserEmail         pgtype.Text
+	UserRole          pgtype.Text
+	Action            AuditAction
+	EntityType        pgtype.Text
+	EntityID          uuid.UUID
+	PerformedAt       pgtype.Timestamp
+	IpAddress         *netip.Addr
+	UserAgent         pgtype.Text
+	Details           []byte
+	OldValues         []byte
+	NewValues         []byte
+	Status            pgtype.Text
+	ErrorMessage      pgtype.Text
+	DataRetentionDays pgtype.Int4
+	MarkedForDeletion pgtype.Bool
+}
+
+type CodingQuestion struct {
+	ID                 pgtype.UUID
+	QuestionID         pgtype.UUID
+	Language           string
+	CodeTemplate       pgtype.Text
+	TestCases          []byte
+	ExecutionTimeLimit pgtype.Int4
+	MemoryLimit        pgtype.Int4
+	CreatedAt          pgtype.Timestamp
+}
+
+type CvApplicationUsage struct {
+	CvID          pgtype.UUID
+	ApplicationID pgtype.UUID
+	UsedAt        pgtype.Timestamp
+}
+
+type CvVersion struct {
+	ID             pgtype.UUID
+	UserID         pgtype.UUID
+	FileName       string
+	FilePath       string
+	FileSize       int32
+	FileHash       string
+	Version        int32
+	IsCurrent      pgtype.Bool
+	UploadedAt     pgtype.Timestamp
+	UploadedFromIp *netip.Addr
+	ApplicationID  uuid.UUID
+	CreatedAt      pgtype.Timestamp
+}
+
+type Job struct {
+	ID                pgtype.UUID
+	Title             string
+	Company           string
+	CompanyLogo       pgtype.Text
+	CompanyWebsite    pgtype.Text
+	CompanyLocation   pgtype.Text
+	Description       string
+	Requirements      string
+	Responsibilities  pgtype.Text
+	Benefits          pgtype.Text
+	JobType           JobType
+	ExperienceLevel   JobExperienceLevel
+	Location          pgtype.Text
+	RemotePossible    pgtype.Bool
+	SalaryMin         pgtype.Int4
+	SalaryMax         pgtype.Int4
+	SalaryCurrency    pgtype.Text
+	Status            JobStatus
+	PublishedAt       pgtype.Timestamp
+	ClosedAt          pgtype.Timestamp
+	ArchivedAt        pgtype.Timestamp
+	ExpiresAt         pgtype.Timestamp
+	PostedBy          pgtype.UUID
+	ViewsCount        pgtype.Int4
+	ApplicationsCount pgtype.Int4
+	CreatedAt         pgtype.Timestamp
+	UpdatedAt         pgtype.Timestamp
+}
+
+type JobApplication struct {
+	ID                     pgtype.UUID
+	JobID                  pgtype.UUID
+	UserID                 pgtype.UUID
+	GithubUsername         string
+	GithubID               int64
+	ApplicantEmail         pgtype.Text
+	ApplicantName          pgtype.Text
+	ApplicantAvatarUrl     pgtype.Text
+	CoverLetter            pgtype.Text
+	ProposedSalary         pgtype.Int4
+	ProposedSalaryCurrency pgtype.Text
+	AvailabilityDate       pgtype.Timestamp
+	PortfolioUrl           pgtype.Text
+	LinkedinUrl            pgtype.Text
+	Notes                  pgtype.Text
+	Status                 ApplicationStatus
+	SubmittedAt            pgtype.Timestamp
+	ReviewedAt             pgtype.Timestamp
+	ReviewedBy             uuid.UUID
+	EmployerFeedback       pgtype.Text
+	RejectionReason        pgtype.Text
+	QuizID                 uuid.UUID
+	QuizScore              pgtype.Int4
+	QuizCompletedAt        pgtype.Timestamp
+	QuizPassed             pgtype.Bool
+	CanViewAiSummary       pgtype.Bool
+	CreatedAt              pgtype.Timestamp
+	UpdatedAt              pgtype.Timestamp
+}
+
+type JobTag struct {
+	JobID     pgtype.UUID
+	TagID     pgtype.UUID
 	CreatedAt pgtype.Timestamp
-	UpdatedAt pgtype.Timestamp
+}
+
+type Question struct {
+	ID               pgtype.UUID
+	QuestionText     string
+	QuestionType     QuestionType
+	Difficulty       QuestionDifficulty
+	Options          []byte
+	CorrectAnswer    pgtype.Text
+	Explanation      pgtype.Text
+	TimeLimitSeconds pgtype.Int4
+	Points           pgtype.Int4
+	Tags             []string
+	CreatedBy        uuid.UUID
+	IsActive         pgtype.Bool
+	UsageCount       pgtype.Int4
+	CreatedAt        pgtype.Timestamp
+	UpdatedAt        pgtype.Timestamp
+}
+
+type QuestionTag struct {
+	QuestionID pgtype.UUID
+	TagID      pgtype.UUID
+	CreatedAt  pgtype.Timestamp
+}
+
+type QuizAnswer struct {
+	ID               pgtype.UUID
+	QuizAttemptID    pgtype.UUID
+	QuestionID       pgtype.UUID
+	UserAnswer       pgtype.Text
+	IsCorrect        pgtype.Bool
+	LastSavedAt      pgtype.Timestamp
+	SaveCount        pgtype.Int4
+	TimeSpentSeconds pgtype.Int4
+	CodeOutput       pgtype.Text
+	ExecutionTimeMs  pgtype.Int4
+	MemoryUsedMb     pgtype.Float8
+	IsSkipped        pgtype.Bool
+	IsReviewed       pgtype.Bool
+	CreatedAt        pgtype.Timestamp
+	UpdatedAt        pgtype.Timestamp
+}
+
+type QuizAnswerHistory struct {
+	ID               pgtype.UUID
+	QuizAnswerID     pgtype.UUID
+	UserAnswer       pgtype.Text
+	TimeSpentSeconds pgtype.Int4
+	SavedAt          pgtype.Timestamp
+	SaveReason       pgtype.Text
+	IpAddress        *netip.Addr
+	UserAgent        pgtype.Text
+}
+
+type QuizAttempt struct {
+	ID                      pgtype.UUID
+	ApplicationID           pgtype.UUID
+	UserID                  pgtype.UUID
+	JobID                   pgtype.UUID
+	TotalQuestions          int32
+	QuestionsPerQuiz        int32
+	TimeLimitMinutes        pgtype.Int4
+	PassingScore            int32
+	Status                  QuizAttemptStatus
+	StartedAt               pgtype.Timestamp
+	CompletedAt             pgtype.Timestamp
+	LastActivityAt          pgtype.Timestamp
+	Score                   pgtype.Int4
+	CorrectAnswers          pgtype.Int4
+	IncorrectAnswers        pgtype.Int4
+	SkippedQuestions        pgtype.Int4
+	Passed                  pgtype.Bool
+	TimeSpentSeconds        pgtype.Int4
+	AutoSaveIntervalSeconds pgtype.Int4
+	CreatedAt               pgtype.Timestamp
+	UpdatedAt               pgtype.Timestamp
+}
+
+type QuizResult struct {
+	ID                         pgtype.UUID
+	QuizAttemptID              pgtype.UUID
+	EasyCorrect                pgtype.Int4
+	EasyTotal                  pgtype.Int4
+	MediumCorrect              pgtype.Int4
+	MediumTotal                pgtype.Int4
+	HardCorrect                pgtype.Int4
+	HardTotal                  pgtype.Int4
+	ExpertCorrect              pgtype.Int4
+	ExpertTotal                pgtype.Int4
+	MultipleChoiceCorrect      pgtype.Int4
+	MultipleChoiceTotal        pgtype.Int4
+	CodingCorrect              pgtype.Int4
+	CodingTotal                pgtype.Int4
+	AvgTimePerQuestionSeconds  pgtype.Float8
+	FastestQuestionTimeSeconds pgtype.Int4
+	SlowestQuestionTimeSeconds pgtype.Int4
+	AiFeedback                 pgtype.Text
+	Strengths                  []string
+	Weaknesses                 []string
+	CreatedAt                  pgtype.Timestamp
+}
+
+type SavedJob struct {
+	UserID  pgtype.UUID
+	JobID   pgtype.UUID
+	SavedAt pgtype.Timestamp
+	Notes   pgtype.Text
+}
+
+type Tag struct {
+	ID          pgtype.UUID
+	Name        string
+	Category    pgtype.Text
+	Description pgtype.Text
+	Color       pgtype.Text
+	CreatedAt   pgtype.Timestamp
+}
+
+type User struct {
+	ID                   pgtype.UUID
+	GithubID             int64
+	GithubUsername       string
+	Email                pgtype.Text
+	AvatarUrl            pgtype.Text
+	Name                 pgtype.Text
+	Role                 string
+	GithubAccessToken    pgtype.Text
+	GithubTokenExpiresAt pgtype.Timestamp
+	LastLoginAt          pgtype.Timestamp
+	CreatedAt            pgtype.Timestamp
+	UpdatedAt            pgtype.Timestamp
+	PublicRepos          pgtype.Int4
+	PublicGists          pgtype.Int4
+	Followers            pgtype.Int4
+	Following            pgtype.Int4
+	Hireable             pgtype.Bool
+	Blog                 pgtype.Text
+	Company              pgtype.Text
+	Location             pgtype.Text
+	Bio                  pgtype.Text
+	TwitterUsername      pgtype.Text
+	TopLanguages         []string
+	ContributionCount    pgtype.Int4
 }
