@@ -37,22 +37,27 @@ func main() {
 	githubService := service.NewGithubService(&cfg)
 	authService := service.NewAuthService(&cfg, githubService, db)
 	jobService := service.NewJobService(db)
+	clamavScanner := service.NewClamAVScanner()
+	cvService := service.NewCvService(db, clamavScanner)
 
 	// Initialize controllers
 	authController := controller.NewAuthController(authService)
 	jobController := controller.NewJobController(jobService)
+	cvController := controller.NewCvController(cvService)
 
 	// Initialize middleware
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 
 	// Initialize router
-	r := router.NewRouter(authController, jobController, authMiddleware)
-	handler := r
+	handler := router.NewRouter(authController, jobController, cvController, authMiddleware)
+
+	// Wrap handler with CORS middleware
+	corsHandler := middleware.CORSMiddleware(handler)
 
 	// Start server
 	serverAddr := ":" + cfg.Port
 	log.Printf("Server starting on %s", serverAddr)
-	if err := http.ListenAndServe(serverAddr, handler); err != nil {
+	if err := http.ListenAndServe(serverAddr, corsHandler); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

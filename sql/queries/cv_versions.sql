@@ -8,7 +8,7 @@ INSERT INTO cv_versions (
 ) VALUES (
     $1, $2, $3, $4, $5, 
     COALESCE((SELECT MAX(version) + 1 FROM cv_versions WHERE user_id = $1), 1),
-    true, $6, $7
+    true, $6, NULLIF($7, '00000000-0000-0000-0000-000000000000'::uuid)
 ) RETURNING *;
 
 -- name: GetCVByID :one
