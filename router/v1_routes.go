@@ -12,6 +12,7 @@ import (
 func V1Routes(
 	authController *controller.AuthController,
 	jobController *controller.JobController,
+	cvController *controller.CvController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -39,6 +40,28 @@ func V1Routes(
 	mux.HandleFunc("PATCH /jobs/{id}/publish", authMiddleware.Authenticate(jobController.PublishJob))
 	mux.HandleFunc("PATCH /jobs/{id}/close", authMiddleware.Authenticate(jobController.CloseJob))
 	mux.HandleFunc("PATCH /jobs/{id}/archive", authMiddleware.Authenticate(jobController.ArchiveJob))
+
+	// -----------------------------------------------------------------------
+	// CV routes — Protected (all require auth)
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("POST /cv/upload", authMiddleware.Authenticate(cvController.UploadCV))
+	mux.HandleFunc("GET /cv/current", authMiddleware.Authenticate(cvController.GetCurrentCV))
+	mux.HandleFunc("GET /cv/versions", authMiddleware.Authenticate(cvController.ListCVVersions))
+	mux.HandleFunc("GET /cv/{id}/download", authMiddleware.Authenticate(cvController.DownloadCV))
+	mux.HandleFunc("DELETE /cv/{id}", authMiddleware.Authenticate(cvController.DeleteCV))
+
+	// -----------------------------------------------------------------------
+	// Admin routes
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /admin/dashboard",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(
+				func(w http.ResponseWriter, r *http.Request) {
+					w.Write([]byte("Admin Dashboard"))
+				},
+			),
+		),
+	)
 
 	return mux
 }

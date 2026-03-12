@@ -34,7 +34,7 @@ INSERT INTO cv_versions (
 ) VALUES (
     $1, $2, $3, $4, $5, 
     COALESCE((SELECT MAX(version) + 1 FROM cv_versions WHERE user_id = $1), 1),
-    true, $6, $7
+    true, $6, NULLIF($7, '00000000-0000-0000-0000-000000000000'::uuid)
 ) RETURNING id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at
 `
 
@@ -45,7 +45,7 @@ type CreateCVParams struct {
 	FileSize       int32
 	FileHash       string
 	UploadedFromIp *netip.Addr
-	ApplicationID  uuid.UUID
+	Column7        interface{}
 }
 
 // CV CRUD operations
@@ -57,7 +57,7 @@ func (q *Queries) CreateCV(ctx context.Context, arg CreateCVParams) (CvVersion, 
 		arg.FileSize,
 		arg.FileHash,
 		arg.UploadedFromIp,
-		arg.ApplicationID,
+		arg.Column7,
 	)
 	var i CvVersion
 	err := row.Scan(

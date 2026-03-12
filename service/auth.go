@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/config"
@@ -231,6 +232,8 @@ func (s *AuthService) ValidateToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(s.config.JWTSecret), nil
 	})
+	log.Println("token:", token)
+
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +241,21 @@ func (s *AuthService) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, fmt.Errorf("invalid token")
 	}
 	return claims, nil
+}
+
+// GetUserByID fetches a user by their UUID from the database.
+func (s *AuthService) GetUserByID(ctx context.Context, userID uuid.UUID) (*models.User, error) {
+	var pgID pgtype.UUID
+	copy(pgID.Bytes[:], userID[:])
+	pgID.Valid = true
+
+	dbUser, err := s.queries.GetUserByID(ctx, pgID)
+	if err != nil {
+		return nil, err
+	}
+
+	user := dbUserToModel(dbUser)
+	return &user, nil
 }
 
 // githubReposToModels converts GitHub API repo structs to response models.
