@@ -40,7 +40,7 @@ RETURNING id, name, category, description, color, created_at
 
 type CreateTagParams struct {
 	Name        string
-	Category    pgtype.Text
+	Category    NullTagCategory
 	Description pgtype.Text
 	Color       pgtype.Text
 }
@@ -62,6 +62,15 @@ func (q *Queries) CreateTag(ctx context.Context, arg CreateTagParams) (Tag, erro
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteTag = `-- name: DeleteTag :exec
+DELETE FROM tags WHERE id = $1
+`
+
+func (q *Queries) DeleteTag(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTag, id)
+	return err
 }
 
 const getJobTags = `-- name: GetJobTags :many
@@ -198,6 +207,52 @@ func (q *Queries) GetTagByName(ctx context.Context, name string) (Tag, error) {
 	return i, err
 }
 
+const getTagsForJobs = `-- name: GetTagsForJobs :many
+SELECT jt.job_id, t.id, t.name, t.category, t.description, t.color, t.created_at
+FROM tags t
+JOIN job_tags jt ON t.id = jt.tag_id
+WHERE jt.job_id = ANY($1::uuid[])
+ORDER BY t.category, t.name
+`
+
+type GetTagsForJobsRow struct {
+	JobID       pgtype.UUID
+	ID          pgtype.UUID
+	Name        string
+	Category    NullTagCategory
+	Description pgtype.Text
+	Color       pgtype.Text
+	CreatedAt   pgtype.Timestamp
+}
+
+func (q *Queries) GetTagsForJobs(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetTagsForJobsRow, error) {
+	rows, err := q.db.Query(ctx, getTagsForJobs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetTagsForJobsRow
+	for rows.Next() {
+		var i GetTagsForJobsRow
+		if err := rows.Scan(
+			&i.JobID,
+			&i.ID,
+			&i.Name,
+			&i.Category,
+			&i.Description,
+			&i.Color,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTags = `-- name: ListTags :many
 SELECT id, name, category, description, color, created_at FROM tags
 ORDER BY category, name
@@ -242,7 +297,7 @@ WHERE category = $1
 ORDER BY name
 `
 
-func (q *Queries) ListTagsByCategory(ctx context.Context, category pgtype.Text) ([]Tag, error) {
+func (q *Queries) ListTagsByCategory(ctx context.Context, category NullTagCategory) ([]Tag, error) {
 	rows, err := q.db.Query(ctx, listTagsByCategory, category)
 	if err != nil {
 		return nil, err
@@ -282,4 +337,43 @@ type RemoveTagFromJobParams struct {
 func (q *Queries) RemoveTagFromJob(ctx context.Context, arg RemoveTagFromJobParams) error {
 	_, err := q.db.Exec(ctx, removeTagFromJob, arg.JobID, arg.TagID)
 	return err
+}
+
+const updateTag = `-- name: UpdateTag :one
+UPDATE tags
+SET 
+    name = COALESCE(NULLIF($1::text, ''), name),
+    category = COALESCE($2, category),
+    description = COALESCE($3, description),
+    color = COALESCE($4, color)
+WHERE id = $5
+RETURNING id, name, category, description, color, created_at
+`
+
+type UpdateTagParams struct {
+	Name        string
+	Category    NullTagCategory
+	Description pgtype.Text
+	Color       pgtype.Text
+	ID          pgtype.UUID
+}
+
+func (q *Queries) UpdateTag(ctx context.Context, arg UpdateTagParams) (Tag, error) {
+	row := q.db.QueryRow(ctx, updateTag,
+		arg.Name,
+		arg.Category,
+		arg.Description,
+		arg.Color,
+		arg.ID,
+	)
+	var i Tag
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Category,
+		&i.Description,
+		&i.Color,
+		&i.CreatedAt,
+	)
+	return i, err
 }

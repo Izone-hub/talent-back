@@ -10,7 +10,7 @@ import (
 	"github.com/Izone-hub/talent-backend/middleware"
 	"github.com/Izone-hub/talent-backend/router"
 	"github.com/Izone-hub/talent-backend/service"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -20,12 +20,12 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Connect to database
-	db, err := pgx.Connect(context.Background(), cfg.GetDatabaseURL())
+	// Connect to database pool
+	db, err := pgxpool.New(context.Background(), cfg.GetDatabaseURL())
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer db.Close(context.Background())
+	defer db.Close()
 
 	// Test database connection
 	if err := db.Ping(context.Background()); err != nil {
@@ -39,19 +39,22 @@ func main() {
 	jobService := service.NewJobService(db)
 	clamavScanner := service.NewClamAVScanner()
 	cvService := service.NewCvService(db, clamavScanner)
+	tagService := service.NewTagService(db)
 
 	// Initialize controllers
 	authController := controller.NewAuthController(authService)
 	jobController := controller.NewJobController(jobService)
 	cvController := controller.NewCvController(cvService)
+	tagController := controller.NewTagController(tagService)
 
 	// Initialize middleware
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 
 	// Initialize router
-	handler := router.NewRouter(authController, jobController, cvController, authMiddleware)
+	handler := router.NewRouter(authController, jobController, cvController, tagController, authMiddleware)
 
-	// Wrap handler with CORS middleware
+	// Wrap handler with logging and CORS middleware
+	handler = middleware.RequestLogger(handler)
 	corsHandler := middleware.CORSMiddleware(handler)
 
 	// Start server

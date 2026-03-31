@@ -8,7 +8,6 @@ import (
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/models"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -18,7 +17,7 @@ type JobService struct {
 }
 
 // NewJobService creates a new JobService backed by the given database connection.
-func NewJobService(db *pgx.Conn) *JobService {
+func NewJobService(db database.DBTX) *JobService {
 	return &JobService{
 		queries: database.New(db),
 	}
@@ -75,6 +74,14 @@ func (s *JobService) GetJob(ctx context.Context, jobID uuid.UUID) (*models.Job, 
 		return nil, fmt.Errorf("job not found: %w", err)
 	}
 	job := dbJobToModel(dbJob)
+
+	// Fetch tags
+	job.Tags = []models.Tag{} // Default to empty slice
+	tags, err := s.queries.GetJobTags(ctx, uuidToPgUUID(jobID))
+	if err == nil {
+		job.Tags = dbTagsToModels(tags)
+	}
+
 	return &job, nil
 }
 
@@ -92,6 +99,14 @@ func (s *JobService) GetPublishedJob(ctx context.Context, jobID uuid.UUID) (*mod
 	_ = s.queries.IncrementJobViews(ctx, pgID)
 
 	job := dbJobToModel(dbJob)
+
+	// Fetch tags
+	job.Tags = []models.Tag{} // Default to empty slice
+	tags, err := s.queries.GetJobTags(ctx, pgID)
+	if err == nil {
+		job.Tags = dbTagsToModels(tags)
+	}
+
 	return &job, nil
 }
 
@@ -105,7 +120,8 @@ func (s *JobService) ListPublishedJobs(ctx context.Context, limit, offset int) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to list published jobs: %w", err)
 	}
-	return dbJobsToModels(dbJobs), nil
+	jobs := dbJobsToModels(dbJobs)
+	return s.enrichJobsWithTags(ctx, jobs)
 }
 
 // ListMyJobs returns jobs posted by a specific user (any status), paginated.
@@ -118,7 +134,8 @@ func (s *JobService) ListMyJobs(ctx context.Context, userID uuid.UUID, limit, of
 	if err != nil {
 		return nil, fmt.Errorf("failed to list jobs: %w", err)
 	}
-	return dbJobsToModels(dbJobs), nil
+	jobs := dbJobsToModels(dbJobs)
+	return s.enrichJobsWithTags(ctx, jobs)
 }
 
 // ---------------------------------------------------------------------------
@@ -279,8 +296,58 @@ func dbJobsToModels(dbJobs []database.Job) []models.Job {
 	return jobs
 }
 
+func (s *JobService) enrichJobsWithTags(ctx context.Context, jobs []models.Job) ([]models.Job, error) {
+	if len(jobs) == 0 {
+		return jobs, nil
+	}
+
+	jobIDs := make([]pgtype.UUID, 0, len(jobs))
+	for _, j := range jobs {
+		jobIDs = append(jobIDs, uuidToPgUUID(j.ID))
+	}
+
+	dbRows, err := s.queries.GetTagsForJobs(ctx, jobIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch tags for jobs: %w", err)
+	}
+
+	// Map tags to job IDs
+	tagMap := make(map[uuid.UUID][]models.Tag)
+	for _, row := range dbRows {
+		var jobID uuid.UUID
+		if row.JobID.Valid {
+			jobID, _ = uuid.FromBytes(row.JobID.Bytes[:])
+		}
+
+		var tagID uuid.UUID
+		if row.ID.Valid {
+			tagID, _ = uuid.FromBytes(row.ID.Bytes[:])
+		}
+
+		tagMap[jobID] = append(tagMap[jobID], models.Tag{
+			ID:          tagID,
+			Name:        row.Name,
+			Category:    pgNullCategoryToStrPtr(row.Category),
+			Description: pgTextToStrPtr(row.Description),
+			Color:       pgTextToStrPtr(row.Color),
+			CreatedAt:   pgTimestampToTime(row.CreatedAt),
+		})
+	}
+
+	// Assign tags to jobs (always use empty slice instead of nil)
+	for i := range jobs {
+		tags := tagMap[jobs[i].ID]
+		if tags == nil {
+			tags = []models.Tag{}
+		}
+		jobs[i].Tags = tags
+	}
+
+	return jobs, nil
+}
+
 // ---------------------------------------------------------------------------
-// pgtype ↔ Go type helpers (job-specific; generic ones live in auth.go)
+// pgtype ↔ Go type helpers
 // ---------------------------------------------------------------------------
 
 func strPtrToPgText(s *string) pgtype.Text {
@@ -314,4 +381,31 @@ func timePtrToPgTimestamp(t *time.Time) pgtype.Timestamp {
 		return pgtype.Timestamp{Valid: false}
 	}
 	return pgtype.Timestamp{Time: *t, Valid: true}
+}
+
+func dbTagsToModels(dbTags []database.Tag) []models.Tag {
+	tags := make([]models.Tag, 0, len(dbTags))
+	for _, t := range dbTags {
+		var id uuid.UUID
+		if t.ID.Valid {
+			id, _ = uuid.FromBytes(t.ID.Bytes[:])
+		}
+		tags = append(tags, models.Tag{
+			ID:          id,
+			Name:        t.Name,
+			Category:    pgNullCategoryToStrPtr(t.Category),
+			Description: pgTextToStrPtr(t.Description),
+			Color:       pgTextToStrPtr(t.Color),
+			CreatedAt:   pgTimestampToTime(t.CreatedAt),
+		})
+	}
+	return tags
+}
+
+func pgNullCategoryToStrPtr(c database.NullTagCategory) *string {
+	if !c.Valid {
+		return nil
+	}
+	s := string(c.TagCategory)
+	return &s
 }

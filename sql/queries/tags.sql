@@ -47,3 +47,23 @@ JOIN job_tags jt ON j.id = jt.job_id
 WHERE jt.tag_id = $1 AND j.status = 'published'
 ORDER BY j.published_at DESC
 LIMIT $2 OFFSET $3;
+
+-- name: DeleteTag :exec
+DELETE FROM tags WHERE id = $1;
+
+-- name: UpdateTag :one
+UPDATE tags
+SET 
+    name = COALESCE(NULLIF(sqlc.arg(name)::text, ''), name),
+    category = COALESCE(sqlc.narg(category), category),
+    description = COALESCE(sqlc.narg(description), description),
+    color = COALESCE(sqlc.narg(color), color)
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: GetTagsForJobs :many
+SELECT jt.job_id, t.id, t.name, t.category, t.description, t.color, t.created_at
+FROM tags t
+JOIN job_tags jt ON t.id = jt.tag_id
+WHERE jt.job_id = ANY($1::uuid[])
+ORDER BY t.category, t.name;

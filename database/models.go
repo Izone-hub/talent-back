@@ -399,6 +399,47 @@ func (ns NullQuizAttemptStatus) Value() (driver.Value, error) {
 	return string(ns.QuizAttemptStatus), nil
 }
 
+type TagCategory string
+
+const (
+	TagCategorySkill TagCategory = "skill"
+)
+
+func (e *TagCategory) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TagCategory(s)
+	case string:
+		*e = TagCategory(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TagCategory: %T", src)
+	}
+	return nil
+}
+
+type NullTagCategory struct {
+	TagCategory TagCategory
+	Valid       bool // Valid is true if TagCategory is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTagCategory) Scan(value interface{}) error {
+	if value == nil {
+		ns.TagCategory, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TagCategory.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTagCategory) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TagCategory), nil
+}
+
 type AdminAuditTrail struct {
 	ID               pgtype.UUID
 	AuditLogID       pgtype.UUID
@@ -653,7 +694,7 @@ type SavedJob struct {
 type Tag struct {
 	ID          pgtype.UUID
 	Name        string
-	Category    pgtype.Text
+	Category    NullTagCategory
 	Description pgtype.Text
 	Color       pgtype.Text
 	CreatedAt   pgtype.Timestamp

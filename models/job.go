@@ -90,6 +90,7 @@ type Job struct {
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	Tags      []Tag     `json:"tags,omitempty" db:"-"`
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +207,7 @@ type JobResponse struct {
 	ApplicationsCount int                `json:"applications_count"`
 	CreatedAt         time.Time          `json:"created_at"`
 	UpdatedAt         time.Time          `json:"updated_at"`
+	Tags              []Tag              `json:"tags,omitempty"`
 }
 
 // JobListResponse wraps a paginated list of jobs.
@@ -244,5 +246,6 @@ func (j *Job) ToResponse() JobResponse {
 		ApplicationsCount: j.ApplicationsCount,
 		CreatedAt:         j.CreatedAt,
 		UpdatedAt:         j.UpdatedAt,
+		Tags:              j.Tags,
 	}
 }

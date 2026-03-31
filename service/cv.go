@@ -16,7 +16,6 @@ import (
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/models"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 // ---------------------------------------------------------------------------
@@ -88,7 +87,7 @@ type CvService struct {
 }
 
 // NewCvService creates a new CvService.
-func NewCvService(db *pgx.Conn, scanner *ClamAVScanner) *CvService {
+func NewCvService(db database.DBTX, scanner *ClamAVScanner) *CvService {
 	// Ensure upload directory exists
 	if err := os.MkdirAll(CVUploadDir, 0755); err != nil {
 		log.Printf("WARNING: could not create upload dir %s: %v", CVUploadDir, err)
