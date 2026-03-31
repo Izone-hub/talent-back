@@ -13,6 +13,7 @@ func V1Routes(
 	authController *controller.AuthController,
 	jobController *controller.JobController,
 	cvController *controller.CvController,
+	tagController *controller.TagController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -49,6 +50,19 @@ func V1Routes(
 	mux.HandleFunc("GET /cv/versions", authMiddleware.Authenticate(cvController.ListCVVersions))
 	mux.HandleFunc("GET /cv/{id}/download", authMiddleware.Authenticate(cvController.DownloadCV))
 	mux.HandleFunc("DELETE /cv/{id}", authMiddleware.Authenticate(cvController.DeleteCV))
+
+	// -----------------------------------------------------------------------
+	// Tags routes
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /tags", tagController.ListTags)
+	mux.HandleFunc("POST /tags", authMiddleware.Authenticate(tagController.CreateTag)) // potentially RequireAdmin
+	mux.HandleFunc("GET /tags/{id}", tagController.GetTag)
+	mux.HandleFunc("PUT /tags/{id}", authMiddleware.Authenticate(tagController.UpdateTag))
+	mux.HandleFunc("DELETE /tags/{id}", authMiddleware.Authenticate(tagController.DeleteTag))
+	mux.HandleFunc("POST /tags/assign", authMiddleware.Authenticate(tagController.AssignTagToJob))
+	mux.HandleFunc("POST /tags/remove", authMiddleware.Authenticate(tagController.RemoveTagFromJob))
+	mux.HandleFunc("GET /tags/{id}/jobs", tagController.GetTagJobs)
+	mux.HandleFunc("GET /jobs/{id}/tags", tagController.GetJobTags)
 
 	// -----------------------------------------------------------------------
 	// Admin routes

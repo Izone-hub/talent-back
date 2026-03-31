@@ -11,7 +11,6 @@ import (
 	"github.com/Izone-hub/talent-backend/models"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -36,7 +35,7 @@ type AuthResponse struct {
 	Repos []models.Repository `json:"repos"`
 }
 
-func NewAuthService(cfg *config.Config, githubService *GithubService, db *pgx.Conn) *AuthService {
+func NewAuthService(cfg *config.Config, githubService *GithubService, db database.DBTX) *AuthService {
 	return &AuthService{
 		config:        cfg,
 		githubService: githubService,

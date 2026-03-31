@@ -1,11 +1,13 @@
 -- +goose Up
 -- +goose StatementBegin
 
+CREATE TYPE tag_category AS ENUM ('skill');
+
 -- Tags table - reusable tags for jobs, questions, etc.
 CREATE TABLE IF NOT EXISTS tags (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) UNIQUE NOT NULL,
-    category VARCHAR(50), -- e.g., 'skill', 'benefit', 'culture', 'technology'
+    category tag_category,
     description TEXT,
     color VARCHAR(7), -- Hex color code for UI
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
