@@ -40,18 +40,20 @@ func main() {
 	clamavScanner := service.NewClamAVScanner()
 	cvService := service.NewCvService(db, clamavScanner)
 	tagService := service.NewTagService(db)
+	questionService := service.NewQuestionService(db)
 
 	// Initialize controllers
 	authController := controller.NewAuthController(authService)
 	jobController := controller.NewJobController(jobService)
 	cvController := controller.NewCvController(cvService)
 	tagController := controller.NewTagController(tagService)
+	questionController := controller.NewQuestionController(questionService)
 
 	// Initialize middleware
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 
 	// Initialize router
-	handler := router.NewRouter(authController, jobController, cvController, tagController, authMiddleware)
+	handler := router.NewRouter(authController, jobController, cvController, tagController, questionController, authMiddleware)
 
 	// Wrap handler with logging and CORS middleware
 	handler = middleware.RequestLogger(handler)

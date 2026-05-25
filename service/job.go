@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/models"
@@ -344,43 +343,6 @@ func (s *JobService) enrichJobsWithTags(ctx context.Context, jobs []models.Job) 
 	}
 
 	return jobs, nil
-}
-
-// ---------------------------------------------------------------------------
-// pgtype ↔ Go type helpers
-// ---------------------------------------------------------------------------
-
-func strPtrToPgText(s *string) pgtype.Text {
-	if s == nil {
-		return pgtype.Text{Valid: false}
-	}
-	return pgtype.Text{String: *s, Valid: true}
-}
-
-func intPtrToPgInt4(i *int) pgtype.Int4 {
-	if i == nil {
-		return pgtype.Int4{Valid: false}
-	}
-	return pgtype.Int4{Int32: int32(*i), Valid: true}
-}
-
-func pgInt4ToIntPtr(i pgtype.Int4) *int {
-	if !i.Valid {
-		return nil
-	}
-	v := int(i.Int32)
-	return &v
-}
-
-func uuidToPgUUID(id uuid.UUID) pgtype.UUID {
-	return pgtype.UUID{Bytes: id, Valid: true}
-}
-
-func timePtrToPgTimestamp(t *time.Time) pgtype.Timestamp {
-	if t == nil {
-		return pgtype.Timestamp{Valid: false}
-	}
-	return pgtype.Timestamp{Time: *t, Valid: true}
 }
 
 func dbTagsToModels(dbTags []database.Tag) []models.Tag {

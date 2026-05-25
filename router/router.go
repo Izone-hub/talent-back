@@ -14,6 +14,7 @@ func NewRouter(
 	jobController *controller.JobController,
 	cvController *controller.CvController,
 	tagController *controller.TagController,
+	questionController *controller.QuestionController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -22,7 +23,7 @@ func NewRouter(
 	// Mount v1 routes under /api/v1/
 	mux.Handle(
 		"/api/v1/",
-		http.StripPrefix("/api/v1", V1Routes(authController, jobController, cvController, tagController, authMiddleware)),
+		http.StripPrefix("/api/v1", V1Routes(authController, jobController, cvController, tagController, questionController, authMiddleware)),
 	)
 
 	return mux
