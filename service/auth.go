@@ -174,38 +174,6 @@ func dbUserToModel(u database.User) models.User {
 	}
 }
 
-func strToPgText(s string) pgtype.Text {
-	return pgtype.Text{String: s, Valid: true}
-}
-
-func pgTextToStrPtr(t pgtype.Text) *string {
-	if !t.Valid {
-		return nil
-	}
-	return &t.String
-}
-
-func pgTextToString(t pgtype.Text) string {
-	if !t.Valid {
-		return ""
-	}
-	return t.String
-}
-
-func pgTimestampToTime(t pgtype.Timestamp) time.Time {
-	if !t.Valid {
-		return time.Time{}
-	}
-	return t.Time
-}
-
-func pgTimestampToTimePtr(t pgtype.Timestamp) *time.Time {
-	if !t.Valid {
-		return nil
-	}
-	return &t.Time
-}
-
 func (s *AuthService) generateJWT(user *models.User) (string, error) {
 	expirationTime := time.Now().Add(24 * time.Hour) // Token expires in 24 hours
 

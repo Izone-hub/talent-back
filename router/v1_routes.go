@@ -14,6 +14,7 @@ func V1Routes(
 	jobController *controller.JobController,
 	cvController *controller.CvController,
 	tagController *controller.TagController,
+	questionController *controller.QuestionController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -63,6 +64,15 @@ func V1Routes(
 	mux.HandleFunc("POST /tags/remove", authMiddleware.Authenticate(tagController.RemoveTagFromJob))
 	mux.HandleFunc("GET /tags/{id}/jobs", tagController.GetTagJobs)
 	mux.HandleFunc("GET /jobs/{id}/tags", tagController.GetJobTags)
+
+	// -----------------------------------------------------------------------
+	// Question routes
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /questions", questionController.ListQuestions)
+	mux.HandleFunc("GET /questions/{id}", questionController.GetQuestion)
+	mux.HandleFunc("POST /questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.CreateQuestion)))
+	mux.HandleFunc("PUT /questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.UpdateQuestion)))
+	mux.HandleFunc("DELETE /questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.DeleteQuestion)))
 
 	// -----------------------------------------------------------------------
 	// Admin routes
