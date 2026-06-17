@@ -20,6 +20,21 @@ func NewRouter(
 
 	mux := http.NewServeMux()
 
+	// Root path handler to check API status and avoid 404
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok","message":"iZone Talent API is running"}`))
+	})
+
 	// Mount v1 routes under /api/v1/
 	mux.Handle(
 		"/api/v1/",
