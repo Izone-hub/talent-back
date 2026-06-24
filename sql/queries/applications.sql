@@ -67,16 +67,17 @@ FROM job_applications a
 JOIN users u ON a.user_id = u.id
 WHERE a.job_id = $1
 ORDER BY 
-    CASE a.status
-        WHEN 'pending' THEN 1
-        WHEN 'quiz_started' THEN 2
-        WHEN 'quiz_completed' THEN 3
-        WHEN 'under_review' THEN 4
-        WHEN 'shortlisted' THEN 5
-        WHEN 'interviewed' THEN 6
-        WHEN 'accepted' THEN 7
-        WHEN 'rejected' THEN 8
-        WHEN 'withdrawn' THEN 9
+    CASE a.status::text
+        WHEN 'draft' THEN 1
+        WHEN 'submitted' THEN 2
+        WHEN 'quiz_started' THEN 3
+        WHEN 'quiz_completed' THEN 4
+        WHEN 'under_review' THEN 5
+        WHEN 'shortlisted' THEN 6
+        WHEN 'interviewed' THEN 7
+        WHEN 'accepted' THEN 8
+        WHEN 'rejected' THEN 9
+        WHEN 'withdrawn' THEN 10
     END,
     a.submitted_at DESC
 LIMIT $2 OFFSET $3;

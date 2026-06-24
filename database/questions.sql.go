@@ -112,6 +112,22 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 	return i, err
 }
 
+const assignTagToQuestion = `-- name: AssignTagToQuestion :exec
+INSERT INTO question_tags (question_id, tag_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type AssignTagToQuestionParams struct {
+	QuestionID pgtype.UUID
+	TagID      pgtype.UUID
+}
+
+func (q *Queries) AssignTagToQuestion(ctx context.Context, arg AssignTagToQuestionParams) error {
+	_, err := q.db.Exec(ctx, assignTagToQuestion, arg.QuestionID, arg.TagID)
+	return err
+}
+
 const deleteQuestion = `-- name: DeleteQuestion :exec
 UPDATE questions
 SET is_active = false, updated_at = NOW()

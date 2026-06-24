@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/models"
@@ -14,12 +16,14 @@ import (
 // QuestionService handles question-related business logic.
 type QuestionService struct {
 	queries *database.Queries
+	db      database.DBTX
 }
 
 // NewQuestionService creates a new QuestionService.
 func NewQuestionService(db database.DBTX) *QuestionService {
 	return &QuestionService{
 		queries: database.New(db),
+		db:      db,
 	}
 }
 
@@ -54,7 +58,12 @@ func (s *QuestionService) CreateQuestion(ctx context.Context, userID uuid.UUID, 
 		Question: dbQuestionToModel(dbQuestion),
 	}
 
-	// 2. If it's a coding challenge, create coding details
+	// 2. Resolve tag names to IDs and populate question_tags junction table
+	if err := s.syncQuestionTags(ctx, dbQuestion.ID, req.Tags); err != nil {
+		return nil, err
+	}
+
+	// 3. If it's a coding challenge, create coding details
 	if req.QuestionType == models.QuestionTypeCodingChallenge && req.CodingDetails != nil {
 		dbCoding, err := s.queries.CreateCodingQuestion(ctx, database.CreateCodingQuestionParams{
 			QuestionID:         dbQuestion.ID,
@@ -158,6 +167,18 @@ func (s *QuestionService) UpdateQuestion(ctx context.Context, id uuid.UUID, req 
 		Question: dbQuestionToModel(dbQuestion),
 	}
 
+	// 2. Resolve and sync tag mappings
+	if req.Tags != nil {
+		if err := s.syncQuestionTags(ctx, pgID, req.Tags); err != nil {
+			return nil, err
+		}
+		// Refetch question to get the updated tags list
+		dbQuestion, err = s.queries.GetQuestionByID(ctx, pgID)
+		if err == nil {
+			res.Question = dbQuestionToModel(dbQuestion)
+		}
+	}
+
 	// 2. Update coding details if applicable
 	if res.QuestionType == models.QuestionTypeCodingChallenge && req.CodingDetails != nil {
 		codingParams := database.UpdateCodingQuestionParams{
@@ -184,6 +205,47 @@ func (s *QuestionService) UpdateQuestion(ctx context.Context, id uuid.UUID, req 
 	}
 
 	return res, nil
+}
+
+// syncQuestionTags synchronizes the junction table question_tags for a given question.
+func (s *QuestionService) syncQuestionTags(ctx context.Context, questionID pgtype.UUID, tagNames []string) error {
+	// First, clear existing tag mappings for this question
+	_, err := s.db.Exec(ctx, "DELETE FROM question_tags WHERE question_id = $1", questionID)
+	if err != nil {
+		return fmt.Errorf("failed to clear old question tags: %w", err)
+	}
+
+	// Now insert/resolve each tag name
+	for _, name := range tagNames {
+		name = strings.TrimSpace(strings.ToLower(name))
+		if name == "" {
+			continue
+		}
+		// Try to find the tag by name
+		tag, err := s.queries.GetTagByName(ctx, name)
+		if err != nil {
+			// Tag doesn't exist, create it!
+			tag, err = s.queries.CreateTag(ctx, database.CreateTagParams{
+				Name: name,
+				Category: database.NullTagCategory{
+					TagCategory: database.TagCategorySkill,
+					Valid:       true,
+				},
+				Description: pgtype.Text{String: "Auto-created tag from question", Valid: true},
+				Color:       pgtype.Text{String: "#6366F1", Valid: true}, // Default indigo
+			})
+			if err != nil {
+				continue
+			}
+		}
+
+		// Assign the tag to the question
+		_ = s.queries.AssignTagToQuestion(ctx, database.AssignTagToQuestionParams{
+			QuestionID: questionID,
+			TagID:      tag.ID,
+		})
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

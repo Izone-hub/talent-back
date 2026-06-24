@@ -66,6 +66,11 @@ UPDATE questions
 SET is_active = false, updated_at = NOW()
 WHERE id = $1;
 
+-- name: AssignTagToQuestion :exec
+INSERT INTO question_tags (question_id, tag_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
 -- name: IncrementQuestionUsage :exec
 UPDATE questions
 SET usage_count = usage_count + 1

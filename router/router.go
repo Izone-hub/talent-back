@@ -8,13 +8,14 @@ import (
 )
 
 // NewRouter creates the top-level HTTP handler.
-// It mounts versioned route groups under their respective prefixes.
 func NewRouter(
 	authController *controller.AuthController,
 	jobController *controller.JobController,
 	cvController *controller.CvController,
 	tagController *controller.TagController,
 	questionController *controller.QuestionController,
+	quizController *controller.QuizController,
+	appController *controller.ApplicationController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -35,11 +36,11 @@ func NewRouter(
 		w.Write([]byte(`{"status":"ok","message":"iZone Talent API is running"}`))
 	})
 
-	// Mount v1 routes under /api/v1/
-	mux.Handle(
-		"/api/v1/",
-		http.StripPrefix("/api/v1", V1Routes(authController, jobController, cvController, tagController, questionController, authMiddleware)),
-	)
+	// -----------------------------------------------------------------------
+	// Mount v1 routes directly (Absolute path mapping)
+	// -----------------------------------------------------------------------
+	v1Mux := V1Routes(authController, jobController, cvController, tagController, questionController, quizController, appController, authMiddleware)
+	mux.Handle("/api/v1/", v1Mux)
 
 	return mux
 }
