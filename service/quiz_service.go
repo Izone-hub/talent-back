@@ -9,22 +9,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// QuizAttempt የፈተና ሙከራን በዳታቤዝ ውስጥ የሚወክል መዋቅር
+// QuizAttempt represents a quiz attempt structure in the database
 type QuizAttempt struct {
 	ID        uuid.UUID `json:"id"`
 	UserID    uuid.UUID `json:"user_id"`
 	Title     string    `json:"title"`
-	Type      string    `json:"type"` // ለጀሚናይ ማይክሮሰርቪስ ታጎች (ኮማ ሴፓሬትድ)
+	Type      string    `json:"type"` // Tags for Gemini microservice (comma-separated)
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// QuizService ሁሉንም የፈተና አመክንዮዎች እና የዳታቤዝ ጥሪዎችን የሚይዝ ሰርቪስ
+// QuizService handles all quiz logic and database calls
 type QuizService struct {
 	pool *pgxpool.Pool
 }
 
-// NewQuizService በ main.go ላይ የሚላከውን *pgxpool.Pool ይቀበላል
+// NewQuizService receives the *pgxpool.Pool sent from main.go
 func NewQuizService(pool *pgxpool.Pool) *QuizService {
 	return &QuizService{pool: pool}
 }
@@ -46,9 +46,9 @@ func (s *QuizService) StartQuizAttempt(ctx context.Context, attemptID string, us
 	return nil
 }
 
-// 🔥 ማስተካከያ፡ 'simulation' የምትለው ቃል ወጥታ ትክክለኛው የ Go interface ፎርማት ተቀምጧል
+// 🔥 Fix: Removed 'simulation' and used the correct Go interface format
 func (s *QuizService) GetQuizQuestions(ctx context.Context, attemptID string, userID string, tags []string) (interface{}, error) {
-	// እውነተኛ ጥያቄዎችን ከዳታቤዝ ለማውጣት የሚደረግ ኩዌሪ
+	// Query to extract real questions from the database
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, question_text, question_type, options 
 		FROM questions 
@@ -63,7 +63,7 @@ func (s *QuizService) GetQuizQuestions(ctx context.Context, attemptID string, us
 	for rows.Next() {
 		var id uuid.UUID
 		var qText, qType string
-		var options *string // JSON string ሊሆን ስለሚችል
+		var options *string // Can be a JSON string
 
 		err := rows.Scan(&id, &qText, &qType, &options)
 		if err != nil {

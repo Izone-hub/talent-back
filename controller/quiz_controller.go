@@ -83,14 +83,14 @@ func (c *QuizController) GetQuizQuestions(w http.ResponseWriter, r *http.Request
 
 	id := r.PathValue("id")
 
-	// ታጎቹን ለማግኘት በመጀመሪያ የ Quiz Attempt መረጃን እናነባለን (ይህም የጀሚናይ ማይክሮሰርቪስ የመረጣቸውን ታጎች የያዘ ነው)
+	// Read Quiz Attempt info first to get tags (which contains Gemini microservice selected tags)
 	quiz, err := c.quizService.GetQuizAttempt(r.Context(), id, claims.UserID.String())
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Quiz attempt context missing: "+err.Error())
 		return
 	}
 
-	// በኮማ የተለዩትን ታጎች ወደ []string እንቀይራቸዋለን
+	// Convert comma-separated tags to []string
 	var targetTags []string
 	if quiz.Type != "" && quiz.Type != "General" {
 		tagsRaw := strings.Split(quiz.Type, ",")
@@ -102,7 +102,7 @@ func (c *QuizController) GetQuizQuestions(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// የተጣሩትን ታጎች ለሰርቪሱ እንሰጣለን
+	// Provide the filtered tags to the service
 	questions, err := c.quizService.GetQuizQuestions(r.Context(), id, claims.UserID.String(), targetTags)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to fetch quiz questions: "+err.Error())
@@ -155,7 +155,7 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 
-	// በስሌቱ ወቅት ጥያቄዎቹን በድጋሚ ለማጣራት የ Attempt ታጎችን እናወጣለን
+	// Fetch attempt tags to filter questions again during calculation
 	quiz, err := c.quizService.GetQuizAttempt(r.Context(), id, claims.UserID.String())
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Quiz attempt context missing: "+err.Error())
@@ -173,7 +173,7 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// የዘመነውን ሰርቪስ በአዲሱ አርጉመንት እንጠራዋለን
+	// Call the updated service with the new argument
 	err = c.quizService.SubmitQuizAttempt(r.Context(), id, claims.UserID.String(), targetTags)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to submit quiz: "+err.Error())
@@ -183,5 +183,5 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Quiz submitted successfully"})
 }
 
-// ዩኒፎርም እንዲሆን የተጠቀሱት writeError እና writeJSON ረዳት ፋንክሽኖች (በሌላ ቦታ ካልተገለጹ)
+// Helper functions writeError and writeJSON to be uniform (if not defined elsewhere)
 
