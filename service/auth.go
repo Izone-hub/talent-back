@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -75,9 +76,23 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 		return nil, fmt.Errorf("failed to upsert user: %w", err)
 	}
 
-	// 5. If user is in admin list but not yet admin, promote
+	// 5. If user is allowed by the admin allowlist or configured admin list,
+	// promote them and ensure an admin row exists.
+	allowlisted, err := s.queries.IsGitHubAllowlisted(ctx, githubUser.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check admin allowlist: %w", err)
+	}
+
+	isConfiguredAdmin := false
 	for _, admin := range s.config.GetAdminUsernames() {
-		if admin == githubUser.Login && dbUser.Role != "admin" {
+		if admin == githubUser.Login {
+			isConfiguredAdmin = true
+			break
+		}
+	}
+
+	if allowlisted || isConfiguredAdmin {
+		if dbUser.Role != "admin" {
 			dbUser, err = s.queries.UpdateUserRole(ctx, database.UpdateUserRoleParams{
 				GithubID: githubUser.ID,
 				Role:     "admin",
@@ -85,7 +100,35 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 			if err != nil {
 				return nil, fmt.Errorf("failed to update user role: %w", err)
 			}
-			break
+		}
+
+		adminPermissions, err := json.Marshal(map[string]bool{
+			"manage_jobs":           true,
+			"manage_questions":      true,
+			"manage_tags":           true,
+			"manage_weights":        true,
+			"manage_difficulties":   true,
+			"view_applicants":       true,
+			"view_cvs":              true,
+			"view_github_metadata":  true,
+			"view_ai_summaries":     true,
+			"view_applicant_summaries": true,
+			"view_audit_logs":       true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal admin permissions: %w", err)
+		}
+
+		_, err = s.queries.UpsertAdmin(ctx, database.UpsertAdminParams{
+			UserID:      pgUUIDToUUID(dbUser.ID),
+			GithubID:    pgtype.Int8{Int64: githubUser.ID, Valid: true},
+			GithubLogin: pgtype.Text{String: githubUser.Login, Valid: true},
+			Email:       strToPgText(githubUser.Email),
+			Role:        "admin",
+			Permissions: adminPermissions,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create/update admin record: %w", err)
 		}
 	}
 

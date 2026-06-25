@@ -58,6 +58,14 @@ func (s *JobService) CreateJob(ctx context.Context, userID uuid.UUID, req models
 		return nil, fmt.Errorf("failed to create job: %w", err)
 	}
 
+	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditActionJobCreated, "job", pgUUIDToUUID(dbJob.ID), map[string]any{
+		"title":   req.Title,
+		"company": req.Company,
+		"status":  "draft",
+	}, nil, nil); err != nil {
+		return nil, fmt.Errorf("failed to record job audit log: %w", err)
+	}
+
 	job := dbJobToModel(dbJob)
 	return &job, nil
 }
@@ -148,6 +156,12 @@ func (s *JobService) UpdateJob(ctx context.Context, userID, jobID uuid.UUID, req
 		return nil, fmt.Errorf("validation error: %w", err)
 	}
 
+	oldDBJob, err := s.queries.GetJobByID(ctx, uuidToPgUUID(jobID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load existing job for audit log: %w", err)
+	}
+	oldJob := dbJobToModel(oldDBJob)
+
 	// Build params — COALESCE in SQL makes empty-string → keep-old, so we
 	// send the current value or the new one depending on what's provided.
 	params := database.UpdateJobParams{
@@ -192,8 +206,14 @@ func (s *JobService) UpdateJob(ctx context.Context, userID, jobID uuid.UUID, req
 		return nil, fmt.Errorf("failed to update job: %w", err)
 	}
 
-	job := dbJobToModel(dbJob)
-	return &job, nil
+	newJob := dbJobToModel(dbJob)
+	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditActionJobUpdated, "job", pgUUIDToUUID(dbJob.ID), map[string]any{
+		"updated_fields": req,
+	}, oldJob, newJob); err != nil {
+		return nil, fmt.Errorf("failed to record job update audit log: %w", err)
+	}
+
+	return &newJob, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +231,9 @@ func (s *JobService) PublishJob(ctx context.Context, userID, jobID uuid.UUID) (*
 		return nil, fmt.Errorf("failed to publish job (must be in draft status and owned by you): %w", err)
 	}
 	job := dbJobToModel(dbJob)
+	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditActionJobPublished, "job", pgUUIDToUUID(dbJob.ID), nil, nil, job); err != nil {
+		return nil, fmt.Errorf("failed to record job publish audit log: %w", err)
+	}
 	return &job, nil
 }
 
@@ -225,6 +248,9 @@ func (s *JobService) CloseJob(ctx context.Context, userID, jobID uuid.UUID) (*mo
 		return nil, fmt.Errorf("failed to close job (must be published and owned by you): %w", err)
 	}
 	job := dbJobToModel(dbJob)
+	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditActionJobClosed, "job", pgUUIDToUUID(dbJob.ID), nil, nil, job); err != nil {
+		return nil, fmt.Errorf("failed to record job close audit log: %w", err)
+	}
 	return &job, nil
 }
 
@@ -239,6 +265,9 @@ func (s *JobService) ArchiveJob(ctx context.Context, userID, jobID uuid.UUID) (*
 		return nil, fmt.Errorf("failed to archive job (must be published or closed and owned by you): %w", err)
 	}
 	job := dbJobToModel(dbJob)
+	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditActionJobArchived, "job", pgUUIDToUUID(dbJob.ID), nil, nil, job); err != nil {
+		return nil, fmt.Errorf("failed to record job archive audit log: %w", err)
+	}
 	return &job, nil
 }
 
