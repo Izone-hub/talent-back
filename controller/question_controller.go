@@ -91,6 +91,12 @@ func (c *QuestionController) GetQuestion(w http.ResponseWriter, r *http.Request)
 // PUT /api/v1/questions/{id} — Update a question
 // ---------------------------------------------------------------------------
 func (c *QuestionController) UpdateQuestion(w http.ResponseWriter, r *http.Request) {
+	userID, ok := getUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -104,7 +110,7 @@ func (c *QuestionController) UpdateQuestion(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	question, err := c.questionService.UpdateQuestion(r.Context(), id, req)
+	question, err := c.questionService.UpdateQuestion(r.Context(), userID, id, req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -117,6 +123,12 @@ func (c *QuestionController) UpdateQuestion(w http.ResponseWriter, r *http.Reque
 // DELETE /api/v1/questions/{id} — Delete a question
 // ---------------------------------------------------------------------------
 func (c *QuestionController) DeleteQuestion(w http.ResponseWriter, r *http.Request) {
+	userID, ok := getUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -124,7 +136,7 @@ func (c *QuestionController) DeleteQuestion(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := c.questionService.DeleteQuestion(r.Context(), id); err != nil {
+	if err := c.questionService.DeleteQuestion(r.Context(), userID, id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
