@@ -80,12 +80,15 @@ func (s *QuestionService) CreateQuestion(ctx context.Context, userID uuid.UUID, 
 		res.CodingDetails = &codingModel
 	}
 
+	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditAction("question_created"), "question", pgUUIDToUUID(dbQuestion.ID), map[string]any{
+		"difficulty":    req.Difficulty,
+		"question_type": req.QuestionType,
+	}, nil, res.Question); err != nil {
+		return nil, fmt.Errorf("failed to record question audit log: %w", err)
+	}
+
 	return res, nil
 }
-
-// ---------------------------------------------------------------------------
-// Read
-// ---------------------------------------------------------------------------
 
 // GetQuestion fetches a question by ID along with its details.
 func (s *QuestionService) GetQuestion(ctx context.Context, id uuid.UUID) (*models.QuestionResponse, error) {
@@ -133,12 +136,17 @@ func (s *QuestionService) ListQuestions(ctx context.Context, limit, offset int) 
 // ---------------------------------------------------------------------------
 
 // UpdateQuestion patches a question and its coding details.
-func (s *QuestionService) UpdateQuestion(ctx context.Context, id uuid.UUID, req models.UpdateQuestionRequest) (*models.QuestionResponse, error) {
+func (s *QuestionService) UpdateQuestion(ctx context.Context, userID, id uuid.UUID, req models.UpdateQuestionRequest) (*models.QuestionResponse, error) {
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validation error: %w", err)
 	}
 
 	pgID := uuidToPgUUID(id)
+	oldDBQuestion, err := s.queries.GetQuestionByID(ctx, pgID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load existing question for audit log: %w", err)
+	}
+	oldQuestion := dbQuestionToModel(oldDBQuestion)
 
 	// 1. Update base question
 	params := database.UpdateQuestionParams{
@@ -204,6 +212,12 @@ func (s *QuestionService) UpdateQuestion(ctx context.Context, id uuid.UUID, req 
 		res.CodingDetails = &codingModel
 	}
 
+	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditAction("question_updated"), "question", id, map[string]any{
+		"updated_fields": req,
+	}, oldQuestion, res.Question); err != nil {
+		return nil, fmt.Errorf("failed to record question update audit log: %w", err)
+	}
+
 	return res, nil
 }
 
@@ -253,8 +267,14 @@ func (s *QuestionService) syncQuestionTags(ctx context.Context, questionID pgtyp
 // ---------------------------------------------------------------------------
 
 // DeleteQuestion soft-deletes a question.
-func (s *QuestionService) DeleteQuestion(ctx context.Context, id uuid.UUID) error {
-	return s.queries.DeleteQuestion(ctx, uuidToPgUUID(id))
+func (s *QuestionService) DeleteQuestion(ctx context.Context, userID, id uuid.UUID) error {
+	if err := s.queries.DeleteQuestion(ctx, uuidToPgUUID(id)); err != nil {
+		return err
+	}
+	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditAction("question_deleted"), "question", id, nil, nil, map[string]any{"id": id.String()}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
