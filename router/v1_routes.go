@@ -72,21 +72,39 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Question routes
 	// -----------------------------------------------------------------------
-	mux.HandleFunc("GET /api/v1/questions", questionController.ListQuestions)
-	mux.HandleFunc("GET /api/v1/questions/{id}", questionController.GetQuestion)
+	// Secure GET routes
+	mux.HandleFunc("GET /api/v1/questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.ListQuestions)))
+
+	mux.HandleFunc("GET /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.GetQuestion)))
+
 	mux.HandleFunc("POST /api/v1/questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.CreateQuestion)))
+
 	mux.HandleFunc("PUT /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.UpdateQuestion)))
+
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.DeleteQuestion)))
 
 	// -----------------------------------------------------------------------
 	// Quiz routes
 	// -----------------------------------------------------------------------
+	// 1. List all quizzes for the user
 	mux.HandleFunc("GET /api/v1/quizzes", authMiddleware.Authenticate(quizController.ListQuizzes))
+
+	// 2. View details of a specific quiz attempt
 	mux.HandleFunc("GET /api/v1/quizzes/{id}", authMiddleware.Authenticate(quizController.GetQuiz))
+
+	// 3. Start the quiz (creates the attempt record)
 	mux.HandleFunc("POST /api/v1/quizzes/{id}/start", authMiddleware.Authenticate(quizController.StartQuiz))
-	mux.HandleFunc("GET /api/v1/quizzes/{id}/questions", authMiddleware.Authenticate(quizController.GetQuizQuestions))
+
+	// 4. Fetch ONLY the next question (Replaces the bulk list)
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/question", authMiddleware.Authenticate(quizController.GetNextQuestion))
+
+	// 5. Submit an answer for the current question
 	mux.HandleFunc("POST /api/v1/quizzes/{id}/answer", authMiddleware.Authenticate(quizController.SaveAnswer))
+
+	// 6. Finish and score the quiz
 	mux.HandleFunc("POST /api/v1/quizzes/{id}/submit", authMiddleware.Authenticate(quizController.SubmitQuiz))
+	// Example registration in main.go
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/next", authMiddleware.Authenticate(quizController.GetNextQuestion))
 
 	// -----------------------------------------------------------------------
 	// Admin routes

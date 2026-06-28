@@ -25,6 +25,8 @@ type Claims struct {
 	UserID         uuid.UUID `json:"user_id"`
 	GithubID       int64     `json:"github_id"`
 	GithubUsername string    `json:"github_username"`
+	ApplicationID uuid.UUID `json:"application_id"` // Add this
+    JobID         uuid.UUID `json:"job_id"`         // Add this
 	Role           string    `json:"role"`
 	jwt.RegisteredClaims
 }
