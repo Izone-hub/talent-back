@@ -74,8 +74,8 @@ func V1Routes(
 	mux.HandleFunc("GET /api/v1/tags/{id}", tagController.GetTag)
 	mux.HandleFunc("PUT /api/v1/tags/{id}", authMiddleware.Authenticate(tagController.UpdateTag))
 	mux.HandleFunc("DELETE /api/v1/tags/{id}", authMiddleware.Authenticate(tagController.DeleteTag))
-	mux.HandleFunc("POST /api/v1/tags/assign", authMiddleware.Authenticate(tagController.AssignTagToJob))
-	mux.HandleFunc("POST /api/v1/tags/remove", authMiddleware.Authenticate(tagController.RemoveTagFromJob))
+	mux.HandleFunc("POST /api/v1/tags/assign", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.AssignTagToJob)))
+	mux.HandleFunc("POST /api/v1/tags/remove", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.RemoveTagFromJob)))
 	mux.HandleFunc("GET /api/v1/tags/{id}/jobs", tagController.GetTagJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/tags", tagController.GetJobTags)
 

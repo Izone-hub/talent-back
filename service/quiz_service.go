@@ -125,21 +125,21 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		return nil, err
 	}
 
-	// Get quiz attempt config: questions_per_quiz and count answered so far
+	// Get quiz attempt config and job tags
 	var questionsPerQuiz int
 	var answeredCount int
+	var jobID uuid.UUID
 	err = s.pool.QueryRow(ctx, `
-        SELECT qp.questions_per_quiz,
+        SELECT qp.questions_per_quiz, qp.job_id,
                (SELECT COUNT(*) FROM quiz_answers qa WHERE qa.quiz_attempt_id = qp.id)
         FROM quiz_attempts qp
         WHERE qp.id = $1
-    `, attemptUUID).Scan(&questionsPerQuiz, &answeredCount)
+    `, attemptUUID).Scan(&questionsPerQuiz, &jobID, &answeredCount)
 	if err != nil {
 		log.Printf("GetNextQuestion ERROR fetching attempt %s: %v", attemptID, err)
 		return nil, err
 	}
 
-	// If already answered questions_per_quiz questions, quiz is finished
 	if answeredCount >= questionsPerQuiz {
 		return map[string]interface{}{
 			"status":  "finished",
@@ -147,6 +147,31 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		}, nil
 	}
 
+	// Get tag names for this job (lowercase for case-insensitive matching)
+	tagRows, err := s.pool.Query(ctx, `
+		SELECT LOWER(t.name) FROM tags t
+		JOIN job_tags jt ON jt.tag_id = t.id
+		WHERE jt.job_id = $1
+	`, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch job tags: %w", err)
+	}
+	defer tagRows.Close()
+
+	var tagNames []string
+	for tagRows.Next() {
+		var name string
+		if err := tagRows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tagNames = append(tagNames, name)
+	}
+
+	if len(tagNames) == 0 {
+		log.Printf("Job %s has no tags, falling back to all questions", jobID)
+	}
+
+	// Select a random unanswered question matching the job's tags
 	query := `
         SELECT q.id, q.question_text, q.question_type, q.options, q.correct_answer, q.difficulty
         FROM questions q
@@ -154,15 +179,25 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
             SELECT 1 FROM quiz_answers qa 
             WHERE qa.question_id = q.id AND qa.quiz_attempt_id = $1
         )
-        ORDER BY RANDOM()
-        LIMIT 1;
     `
+
+	var args []interface{}
+	args = append(args, attemptUUID)
+
+	if len(tagNames) > 0 {
+		query += ` AND EXISTS (
+            SELECT 1 FROM unnest(q.tags) qt WHERE LOWER(qt) = ANY($2::text[])
+        )`
+		args = append(args, tagNames)
+	}
+
+	query += ` ORDER BY RANDOM() LIMIT 1`
 
 	var id uuid.UUID
 	var qText, qType, difficulty string
 	var options, correctAnswer *string
 
-	err = s.pool.QueryRow(ctx, query, attemptUUID).Scan(&id, &qText, &qType, &options, &correctAnswer, &difficulty)
+	err = s.pool.QueryRow(ctx, query, args...).Scan(&id, &qText, &qType, &options, &correctAnswer, &difficulty)
 	if err != nil {
 		log.Printf("GetNextQuestion ERROR for attemptID=%s: %v", attemptID, err)
 		return nil, err
