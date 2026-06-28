@@ -150,7 +150,7 @@ UPDATE job_applications
 SET 
     status = 'accepted',
     updated_at = NOW()
-WHERE id = $1 AND status IN ('under_review', 'shortlisted', 'interviewed')
+WHERE id = $1 AND status IN ('submitted', 'quiz_completed', 'under_review', 'shortlisted', 'interviewed')
 RETURNING *;
 
 -- name: RejectApplication :one

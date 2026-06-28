@@ -33,7 +33,37 @@ func NewQuizService(pool *pgxpool.Pool) *QuizService {
 
 // GetUserQuizzes retrieves all quiz attempts belonging to a specific user
 func (s *QuizService) GetUserQuizzes(ctx context.Context, userID string) ([]QuizAttempt, error) {
-	return []QuizAttempt{}, nil
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT qa.id, qa.user_id, COALESCE(j.title, 'Quiz') as title, qa.status, qa.created_at
+		FROM quiz_attempts qa
+		LEFT JOIN jobs j ON qa.job_id = j.id
+		WHERE qa.user_id = $1
+		ORDER BY qa.created_at DESC
+	`, userUUID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var quizzes []QuizAttempt
+	for rows.Next() {
+		var q QuizAttempt
+		if err := rows.Scan(&q.ID, &q.UserID, &q.Title, &q.Status, &q.CreatedAt); err != nil {
+			return nil, err
+		}
+		quizzes = append(quizzes, q)
+	}
+
+	if quizzes == nil {
+		quizzes = []QuizAttempt{}
+	}
+
+	return quizzes, nil
 }
 
 // GetQuizAttempt fetches the profile configuration of a specific attempt
@@ -56,10 +86,7 @@ func (s *QuizService) GetQuizAttempt(ctx context.Context, attemptID string, user
 	}, nil
 }
 
-// StartQuizAttempt initializes an active session entry point
 // StartQuizAttempt initializes an active session entry point in the actual database
-// StartQuizAttempt initializes an active session entry point in the actual database
-// StartQuizAttempt initializes an active session entry point
 // Updated signature to accept external IDs
 func (s *QuizService) StartQuizAttempt(ctx context.Context, attemptID, userID, appID, jobID string) error {
 	// 1. Check if an active attempt exists for this application
@@ -98,6 +125,28 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		return nil, err
 	}
 
+	// Get quiz attempt config: questions_per_quiz and count answered so far
+	var questionsPerQuiz int
+	var answeredCount int
+	err = s.pool.QueryRow(ctx, `
+        SELECT qp.questions_per_quiz,
+               (SELECT COUNT(*) FROM quiz_answers qa WHERE qa.quiz_attempt_id = qp.id)
+        FROM quiz_attempts qp
+        WHERE qp.id = $1
+    `, attemptUUID).Scan(&questionsPerQuiz, &answeredCount)
+	if err != nil {
+		log.Printf("GetNextQuestion ERROR fetching attempt %s: %v", attemptID, err)
+		return nil, err
+	}
+
+	// If already answered questions_per_quiz questions, quiz is finished
+	if answeredCount >= questionsPerQuiz {
+		return map[string]interface{}{
+			"status":  "finished",
+			"message": "You have answered all questions in this quiz",
+		}, nil
+	}
+
 	query := `
         SELECT q.id, q.question_text, q.question_type, q.options, q.correct_answer, q.difficulty
         FROM questions q
@@ -105,7 +154,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
             SELECT 1 FROM quiz_answers qa 
             WHERE qa.question_id = q.id AND qa.quiz_attempt_id = $1
         )
-        ORDER BY q.id ASC
+        ORDER BY RANDOM()
         LIMIT 1;
     `
 
@@ -113,7 +162,6 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	var qText, qType, difficulty string
 	var options, correctAnswer *string
 
-	// Scan all 6 columns
 	err = s.pool.QueryRow(ctx, query, attemptUUID).Scan(&id, &qText, &qType, &options, &correctAnswer, &difficulty)
 	if err != nil {
 		log.Printf("GetNextQuestion ERROR for attemptID=%s: %v", attemptID, err)
@@ -124,7 +172,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		"id":            id.String(),
 		"question_text": qText,
 		"question_type": qType,
-		"difficulty":    difficulty, // Include this if the frontend needs it
+		"difficulty":    difficulty,
 	}
 
 	if options != nil {
@@ -178,11 +226,20 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 }
 
 // SubmitQuizAttempt calculates and locks progress finality status safely
-// SubmitQuizAttempt calculates and locks progress finality status safely
 func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, userID string, tags []string) error {
 	attemptUUID, err := uuid.Parse(attemptID)
 	if err != nil {
 		return fmt.Errorf("invalid attempt ID: %w", err)
+	}
+
+	// Check if already completed
+	var currentStatus string
+	err = s.pool.QueryRow(ctx, "SELECT status FROM quiz_attempts WHERE id = $1", attemptUUID).Scan(&currentStatus)
+	if err != nil {
+		return fmt.Errorf("could not find quiz attempt: %w", err)
+	}
+	if currentStatus == "completed" {
+		return fmt.Errorf("quiz attempt %s is already completed", attemptID)
 	}
 
 	// Start a database transaction
@@ -193,7 +250,6 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 	defer tx.Rollback(ctx)
 
 	// 1. Get the APPLICATION_ID associated with this quiz
-	// This allows us to link the quiz back to the job application record
 	var appID uuid.UUID
 	err = tx.QueryRow(ctx, "SELECT application_id FROM quiz_attempts WHERE id = $1", attemptUUID).Scan(&appID)
 	if err != nil {
@@ -217,15 +273,13 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 
 	// 3. Update Quiz status to completed
 	_, err = tx.Exec(ctx,
-		"UPDATE quiz_attempts SET status = 'completed', updated_at = NOW() WHERE id = $1",
-		attemptUUID)
+		"UPDATE quiz_attempts SET status = 'completed', score = $2, correct_answers = $3, updated_at = NOW() WHERE id = $1",
+		attemptUUID, int(score), correctCount)
 	if err != nil {
 		return err
 	}
 
 	// 4. Update the actual application status
-	// Note: If you get an error here saying the table doesn't exist,
-	// change 'job_applications' to 'applications'
 	_, err = tx.Exec(ctx, `
         UPDATE job_applications 
         SET status = 'quiz_completed', 
@@ -237,6 +291,5 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 		return fmt.Errorf("failed to update job_applications table: %w", err)
 	}
 
-	// Commit the transaction
 	return tx.Commit(ctx)
 }

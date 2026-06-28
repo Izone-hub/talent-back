@@ -39,13 +39,23 @@ func V1Routes(
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/close", authMiddleware.Authenticate(jobController.CloseJob))
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/archive", authMiddleware.Authenticate(jobController.ArchiveJob))
 	mux.HandleFunc("POST /api/v1/jobs/{id}/apply", authMiddleware.Authenticate(appController.ApplyForJob))
-	mux.HandleFunc("GET /api/v1/jobs/{id}/applications", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetJobApplications)))
 
 	// -----------------------------------------------------------------------
 	// Application routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/applications/my", authMiddleware.Authenticate(appController.GetMyApplications))
+	mux.HandleFunc("GET /api/v1/applications/recent", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetRecentApplications)))
+	mux.HandleFunc("GET /api/v1/applications/status/{status}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.ListApplicationsByStatus)))
+	mux.HandleFunc("GET /api/v1/applications/{id}", authMiddleware.Authenticate(appController.GetApplicationDetail))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/review", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.StartReview)))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/shortlist", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.ShortlistApplication)))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/interview", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.MarkInterviewed)))
 	mux.HandleFunc("PATCH /api/v1/applications/{id}/accept", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.AcceptApplication)))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/reject", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.RejectApplication)))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/withdraw", authMiddleware.Authenticate(appController.WithdrawApplication))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/feedback", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.AddEmployerFeedback)))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/applications", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetJobApplications)))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/applications/counts", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetApplicationCountsByJob)))
 
 	// -----------------------------------------------------------------------
 	// CV routes — Protected

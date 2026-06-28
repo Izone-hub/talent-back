@@ -21,16 +21,23 @@ func NewApplicationService(db database.DBTX) *ApplicationService {
 }
 
 func (s *ApplicationService) ApplyForJob(ctx context.Context, jobID uuid.UUID, claims *Claims) (database.JobApplication, error) {
-	// 1. Check if job exists
 	var pgJobID pgtype.UUID
 	copy(pgJobID.Bytes[:], jobID[:])
 	pgJobID.Valid = true
+
+	// Check if job exists and is published
+	job, err := s.queries.GetJobByID(ctx, pgJobID)
+	if err != nil {
+		return database.JobApplication{}, fmt.Errorf("job not found: %w", err)
+	}
+	if job.Status != database.JobStatusPublished {
+		return database.JobApplication{}, fmt.Errorf("job is not accepting applications")
+	}
 
 	var pgUserID pgtype.UUID
 	copy(pgUserID.Bytes[:], claims.UserID[:])
 	pgUserID.Valid = true
 
-	// Check if already applied
 	hasApplied, err := s.queries.HasUserApplied(ctx, database.HasUserAppliedParams{
 		JobID:  pgJobID,
 		UserID: pgUserID,
@@ -42,7 +49,6 @@ func (s *ApplicationService) ApplyForJob(ctx context.Context, jobID uuid.UUID, c
 		return database.JobApplication{}, fmt.Errorf("user has already applied for this job")
 	}
 
-	// Retrieve user profile to populate applicant details
 	user, err := s.queries.GetUserByID(ctx, pgUserID)
 	if err != nil {
 		return database.JobApplication{}, fmt.Errorf("failed to retrieve user details: %w", err)
@@ -68,7 +74,6 @@ func (s *ApplicationService) ApplyForJob(ctx context.Context, jobID uuid.UUID, c
 		return database.JobApplication{}, fmt.Errorf("failed to create application: %w", err)
 	}
 
-	// 3. Create Quiz attempt and link it back to the application
 	quizAttempt, err := s.queries.CreateQuizAttempt(ctx, database.CreateQuizAttemptParams{
 		ApplicationID:    app.ID,
 		UserID:           pgUserID,
@@ -79,12 +84,10 @@ func (s *ApplicationService) ApplyForJob(ctx context.Context, jobID uuid.UUID, c
 		PassingScore:     70,
 	})
 	if err != nil {
-		// Application was created but quiz failed — still return the application
 		fmt.Printf("ERROR CreateQuizAttempt: %v\n", err)
 		return app, nil
 	}
- 
-	// Link the quiz_id back to the application and set status to quiz_started
+
 	quizUUID, err := uuid.FromBytes(quizAttempt.ID.Bytes[:])
 	if err != nil {
 		fmt.Printf("ERROR converting quiz ID: %v\n", err)
@@ -103,7 +106,6 @@ func (s *ApplicationService) ApplyForJob(ctx context.Context, jobID uuid.UUID, c
 	return app, nil
 }
 
-// GetMyApplications fetches all applications for a candidate with full details
 func (s *ApplicationService) GetMyApplications(ctx context.Context, userID uuid.UUID) ([]database.ListApplicationsByUserRow, error) {
 	var pgUserID pgtype.UUID
 	copy(pgUserID.Bytes[:], userID[:])
@@ -116,7 +118,6 @@ func (s *ApplicationService) GetMyApplications(ctx context.Context, userID uuid.
 	})
 }
 
-// GetApplicationsForJob fetches all applications for a specific job (Employer view)
 func (s *ApplicationService) GetApplicationsForJob(ctx context.Context, jobID uuid.UUID, limit, offset int32) ([]database.ListApplicationsByJobRow, error) {
 	var pgJobID pgtype.UUID
 	copy(pgJobID.Bytes[:], jobID[:])
@@ -129,11 +130,103 @@ func (s *ApplicationService) GetApplicationsForJob(ctx context.Context, jobID uu
 	})
 }
 
-// AcceptApplication marks an application as accepted (Employer action)
+func (s *ApplicationService) GetApplicationDetail(ctx context.Context, appID uuid.UUID) (database.GetApplicationWithDetailsRow, error) {
+	var pgAppID pgtype.UUID
+	copy(pgAppID.Bytes[:], appID[:])
+	pgAppID.Valid = true
+
+	return s.queries.GetApplicationWithDetails(ctx, pgAppID)
+}
+
+func (s *ApplicationService) StartReview(ctx context.Context, appID uuid.UUID, reviewerID uuid.UUID) (database.JobApplication, error) {
+	var pgAppID pgtype.UUID
+	copy(pgAppID.Bytes[:], appID[:])
+	pgAppID.Valid = true
+
+	return s.queries.StartReview(ctx, database.StartReviewParams{
+		ID:         pgAppID,
+		ReviewedBy: reviewerID,
+	})
+}
+
+func (s *ApplicationService) ShortlistApplication(ctx context.Context, appID uuid.UUID) (database.JobApplication, error) {
+	var pgAppID pgtype.UUID
+	copy(pgAppID.Bytes[:], appID[:])
+	pgAppID.Valid = true
+
+	return s.queries.ShortlistApplication(ctx, pgAppID)
+}
+
+func (s *ApplicationService) MarkInterviewed(ctx context.Context, appID uuid.UUID) (database.JobApplication, error) {
+	var pgAppID pgtype.UUID
+	copy(pgAppID.Bytes[:], appID[:])
+	pgAppID.Valid = true
+
+	return s.queries.MarkInterviewed(ctx, pgAppID)
+}
+
 func (s *ApplicationService) AcceptApplication(ctx context.Context, appID uuid.UUID) (database.JobApplication, error) {
 	var pgAppID pgtype.UUID
 	copy(pgAppID.Bytes[:], appID[:])
 	pgAppID.Valid = true
 
 	return s.queries.AcceptApplication(ctx, pgAppID)
+}
+
+func (s *ApplicationService) RejectApplication(ctx context.Context, appID uuid.UUID, reason, feedback string) (database.JobApplication, error) {
+	var pgAppID pgtype.UUID
+	copy(pgAppID.Bytes[:], appID[:])
+	pgAppID.Valid = true
+
+	return s.queries.RejectApplication(ctx, database.RejectApplicationParams{
+		ID:               pgAppID,
+		RejectionReason:  pgtype.Text{String: reason, Valid: reason != ""},
+		EmployerFeedback: pgtype.Text{String: feedback, Valid: feedback != ""},
+	})
+}
+
+func (s *ApplicationService) WithdrawApplication(ctx context.Context, appID uuid.UUID, userID uuid.UUID) (database.JobApplication, error) {
+	var pgAppID pgtype.UUID
+	copy(pgAppID.Bytes[:], appID[:])
+	pgAppID.Valid = true
+
+	var pgUserID pgtype.UUID
+	copy(pgUserID.Bytes[:], userID[:])
+	pgUserID.Valid = true
+
+	return s.queries.WithdrawApplication(ctx, database.WithdrawApplicationParams{
+		ID:     pgAppID,
+		UserID: pgUserID,
+	})
+}
+
+func (s *ApplicationService) ListApplicationsByStatus(ctx context.Context, status database.ApplicationStatus, limit, offset int32) ([]database.JobApplication, error) {
+	return s.queries.ListApplicationsByStatus(ctx, database.ListApplicationsByStatusParams{
+		Status: status,
+		Limit:  limit,
+		Offset: offset,
+	})
+}
+
+func (s *ApplicationService) GetApplicationCountsByJob(ctx context.Context, jobID uuid.UUID) (database.GetApplicationCountsByJobRow, error) {
+	var pgJobID pgtype.UUID
+	copy(pgJobID.Bytes[:], jobID[:])
+	pgJobID.Valid = true
+
+	return s.queries.GetApplicationCountsByJob(ctx, pgJobID)
+}
+
+func (s *ApplicationService) AddEmployerFeedback(ctx context.Context, appID uuid.UUID, feedback string) (database.JobApplication, error) {
+	var pgAppID pgtype.UUID
+	copy(pgAppID.Bytes[:], appID[:])
+	pgAppID.Valid = true
+
+	return s.queries.AddEmployerFeedback(ctx, database.AddEmployerFeedbackParams{
+		ID:               pgAppID,
+		EmployerFeedback: pgtype.Text{String: feedback, Valid: feedback != ""},
+	})
+}
+
+func (s *ApplicationService) GetRecentApplications(ctx context.Context, limit int32) ([]database.JobApplication, error) {
+	return s.queries.GetRecentApplications(ctx, limit)
 }
