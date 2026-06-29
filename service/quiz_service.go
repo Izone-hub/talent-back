@@ -306,22 +306,33 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 		score = (float64(correctCount) / float64(totalQuestions)) * 100
 	}
 
-	// 3. Update Quiz status to completed
+	// 3. Fetch passing_score to determine pass/fail
+	var passingScore int
+	err = tx.QueryRow(ctx, "SELECT passing_score FROM quiz_attempts WHERE id = $1", attemptUUID).Scan(&passingScore)
+	if err != nil {
+		return fmt.Errorf("failed to fetch passing_score: %w", err)
+	}
+
+	passed := int(score) >= passingScore
+
+	// 4. Update Quiz status to completed
 	_, err = tx.Exec(ctx,
-		"UPDATE quiz_attempts SET status = 'completed', score = $2, correct_answers = $3, updated_at = NOW() WHERE id = $1",
-		attemptUUID, int(score), correctCount)
+		"UPDATE quiz_attempts SET status = 'completed', score = $2, correct_answers = $3, passed = $4, completed_at = NOW(), updated_at = NOW() WHERE id = $1",
+		attemptUUID, int(score), correctCount, passed)
 	if err != nil {
 		return err
 	}
 
-	// 4. Update the actual application status
+	// 5. Update the actual application status
 	_, err = tx.Exec(ctx, `
         UPDATE job_applications 
         SET status = 'quiz_completed', 
             quiz_score = $1, 
-            quiz_completed_at = NOW() 
-        WHERE id = $2`,
-		score, appID)
+            quiz_completed_at = NOW(),
+            quiz_passed = $2,
+            updated_at = NOW()
+        WHERE id = $3`,
+		score, passed, appID)
 	if err != nil {
 		return fmt.Errorf("failed to update job_applications table: %w", err)
 	}
