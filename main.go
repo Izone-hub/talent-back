@@ -80,12 +80,15 @@ func main() {
 	tagService := service.NewTagService(db)
 	questionService := service.NewQuestionService(db)
 
+	sandboxService := service.NewSandboxService()
+
 	// Initialize controllers
 	authController := controller.NewAuthController(authService)
 	jobController := controller.NewJobController(jobService)
 	cvController := controller.NewCvController(cvService)
 	tagController := controller.NewTagController(tagService)
 	questionController := controller.NewQuestionController(questionService)
+	sandboxController := controller.NewSandboxController(sandboxService)
 
 	// Initialize middleware
 	authMiddleware := middleware.NewAuthMiddleware(authService)
@@ -106,6 +109,7 @@ func main() {
 		questionController,
 		quizController,
 		appController,
+		sandboxController,
 		authMiddleware,
 	)
 

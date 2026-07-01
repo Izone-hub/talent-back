@@ -11,6 +11,12 @@
 
 ### 1. Sandbox Setup (Recommended)
 
+Build custom sandbox Docker images (Go, TypeScript):
+```bash
+docker build -t sandbox-go:1.25 -f templates/Dockerfile.sandbox-go .
+docker build -t sandbox-node:22 -f templates/Dockerfile.sandbox-node .
+```
+
 Start a local PostgreSQL and load sample data:
 
 ```bash
