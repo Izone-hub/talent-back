@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -19,9 +21,10 @@ func NewTagService(db database.DBTX) *TagService {
 }
 
 // CreateTag creates a new tag or updates an existing one if the name conflicts.
+// Names are stored in lowercase for consistent matching.
 func (s *TagService) CreateTag(ctx context.Context, req models.Tag) (database.Tag, error) {
 	arg := database.CreateTagParams{
-		Name:        req.Name,
+		Name:        strings.ToLower(req.Name),
 		Category:    strPtrToNullCategory(req.Category),
 		Description: strPtrToPgText(req.Description),
 		Color:       strPtrToPgText(req.Color),
@@ -45,16 +48,47 @@ func (s *TagService) GetTagByID(ctx context.Context, id uuid.UUID) (database.Tag
 }
 
 // AssignTagToJob assigns a specific tag to a specific job.
-func (s *TagService) AssignTagToJob(ctx context.Context, jobID, tagID uuid.UUID) error {
+// Accepts either tagID (UUID) or tagName (string) — if tagID is zero, looks up by name.
+func (s *TagService) AssignTagToJob(ctx context.Context, jobID uuid.UUID, tagID uuid.UUID, tagName string) (database.Tag, error) {
+	if tagID == uuid.Nil && tagName != "" {
+		tag, err := s.db.GetTagByName(ctx, strings.ToLower(tagName))
+		if err != nil {
+			return database.Tag{}, fmt.Errorf("tag not found by name %q: %w", tagName, err)
+		}
+		tagID = uuid.UUID(tag.ID.Bytes)
+	}
+
+	if tagID == uuid.Nil {
+		return database.Tag{}, fmt.Errorf("tag_id or tag_name is required")
+	}
+
 	arg := database.AssignTagToJobParams{
 		JobID: pgtype.UUID{Bytes: jobID, Valid: true},
 		TagID: pgtype.UUID{Bytes: tagID, Valid: true},
 	}
-	return s.db.AssignTagToJob(ctx, arg)
+	if err := s.db.AssignTagToJob(ctx, arg); err != nil {
+		return database.Tag{}, err
+	}
+
+	pgID := pgtype.UUID{Bytes: tagID, Valid: true}
+	return s.db.GetTagByID(ctx, pgID)
 }
 
 // RemoveTagFromJob removes a specific tag from a specific job.
-func (s *TagService) RemoveTagFromJob(ctx context.Context, jobID, tagID uuid.UUID) error {
+// Accepts either tagID (UUID) or tagName (string) — if tagID is zero, looks up by name.
+func (s *TagService) RemoveTagFromJob(ctx context.Context, jobID uuid.UUID, tagID uuid.UUID, tagName string) error {
+	if tagID == uuid.Nil && tagName != "" {
+		tag, err := s.db.GetTagByName(ctx, strings.ToLower(tagName))
+		if err != nil {
+			return fmt.Errorf("tag not found by name %q: %w", tagName, err)
+		}
+		tagID = uuid.UUID(tag.ID.Bytes)
+	}
+
+	if tagID == uuid.Nil {
+		return fmt.Errorf("tag_id or tag_name is required")
+	}
+
 	arg := database.RemoveTagFromJobParams{
 		JobID: pgtype.UUID{Bytes: jobID, Valid: true},
 		TagID: pgtype.UUID{Bytes: tagID, Valid: true},

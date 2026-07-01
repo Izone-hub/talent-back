@@ -80,27 +80,29 @@ func (c *TagController) GetTag(w http.ResponseWriter, r *http.Request) {
 
 func (c *TagController) AssignTagToJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		JobID uuid.UUID `json:"job_id"`
-		TagID uuid.UUID `json:"tag_id"`
+		JobID   uuid.UUID `json:"job_id"`
+		TagID   uuid.UUID `json:"tag_id"`
+		TagName string    `json:"tag_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
 
-	if req.JobID == uuid.Nil || req.TagID == uuid.Nil {
-		writeError(w, http.StatusBadRequest, "Job ID and tag ID are required")
+	if req.JobID == uuid.Nil {
+		writeError(w, http.StatusBadRequest, "Job ID is required")
 		return
 	}
 
-	err := c.tagService.AssignTagToJob(r.Context(), req.JobID, req.TagID)
+	tag, err := c.tagService.AssignTagToJob(r.Context(), req.JobID, req.TagID, req.TagName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Tag assigned to job successfully",
+		"tag":     tag,
 	})
 }
 
@@ -123,20 +125,21 @@ func (c *TagController) GetJobTags(w http.ResponseWriter, r *http.Request) {
 
 func (c *TagController) RemoveTagFromJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		JobID uuid.UUID `json:"job_id"`
-		TagID uuid.UUID `json:"tag_id"`
+		JobID   uuid.UUID `json:"job_id"`
+		TagID   uuid.UUID `json:"tag_id"`
+		TagName string    `json:"tag_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
 
-	if req.JobID == uuid.Nil || req.TagID == uuid.Nil {
-		writeError(w, http.StatusBadRequest, "Job ID and tag ID are required")
+	if req.JobID == uuid.Nil {
+		writeError(w, http.StatusBadRequest, "Job ID is required")
 		return
 	}
 
-	err := c.tagService.RemoveTagFromJob(r.Context(), req.JobID, req.TagID)
+	err := c.tagService.RemoveTagFromJob(r.Context(), req.JobID, req.TagID, req.TagName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

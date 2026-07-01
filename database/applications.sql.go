@@ -17,7 +17,7 @@ UPDATE job_applications
 SET 
     status = 'accepted',
     updated_at = NOW()
-WHERE id = $1 AND status IN ('under_review', 'shortlisted', 'interviewed')
+WHERE id = $1 AND status IN ('submitted', 'quiz_completed', 'under_review', 'shortlisted', 'interviewed')
 RETURNING id, job_id, user_id, github_username, github_id, applicant_email, applicant_name, applicant_avatar_url, cover_letter, proposed_salary, proposed_salary_currency, availability_date, portfolio_url, linkedin_url, notes, status, submitted_at, reviewed_at, reviewed_by, employer_feedback, rejection_reason, quiz_id, quiz_score, quiz_completed_at, quiz_passed, can_view_ai_summary, created_at, updated_at
 `
 
