@@ -1,0 +1,3 @@
+FROM golang:1.25-bookworm
+ENV GOCACHE=/root/.cache/go-build
+RUN GO111MODULE=off go build -o /dev/null std 2>/dev/null

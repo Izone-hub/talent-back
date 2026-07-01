@@ -152,7 +152,46 @@ func (c *QuizController) SaveAnswer(w http.ResponseWriter, r *http.Request) {
 
     writeJSON(w, http.StatusOK, map[string]string{"message": "Answer saved successfully"})
 }
-// 6. SubmitQuiz handler
+// 6. RunCode handler (for coding_challenge questions)
+func (c *QuizController) RunCode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	id := r.PathValue("id")
+
+	var req struct {
+		QuestionID string `json:"question_id"`
+		Language   string `json:"language"`
+		Code       string `json:"code"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request payload: "+err.Error())
+		return
+	}
+
+	if req.QuestionID == "" {
+		writeError(w, http.StatusBadRequest, "question_id is required")
+		return
+	}
+
+	log.Printf("RunCode: attemptID=%s, userID=%s, questionID=%s, lang=%s", id, claims.UserID.String(), req.QuestionID, req.Language)
+
+	result, err := c.quizService.RunQuizCode(r.Context(), id, req.QuestionID, req.Language, req.Code)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// 7. SubmitQuiz handler
 func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

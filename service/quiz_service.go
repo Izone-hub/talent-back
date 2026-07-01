@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/Izone-hub/talent-backend/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -172,6 +173,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	}
 
 	// Select a random unanswered question matching the job's tags
+	// Skip coding_challenge questions that have no data in coding_questions table
 	query := `
         SELECT q.id, q.question_text, q.question_type, q.options, q.correct_answer, q.difficulty
         FROM questions q
@@ -179,6 +181,9 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
             SELECT 1 FROM quiz_answers qa 
             WHERE qa.question_id = q.id AND qa.quiz_attempt_id = $1
         )
+        AND (q.question_type != 'coding_challenge' OR EXISTS (
+            SELECT 1 FROM coding_questions cq WHERE cq.question_id = q.id
+        ))
     `
 
 	var args []interface{}
@@ -216,6 +221,48 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		qMap["options"] = json.RawMessage(`[]`)
 	}
 
+	// For coding_challenge, also fetch coding_details (without hidden test cases)
+	if qType == "coding_challenge" {
+		var lang string
+		var codeTemplate *string
+		var testCases json.RawMessage
+		var execTimeLimit, memLimit int
+
+		err := s.pool.QueryRow(ctx, `
+			SELECT language, code_template, test_cases, execution_time_limit, memory_limit
+			FROM coding_questions
+			WHERE question_id = $1
+		`, id).Scan(&lang, &codeTemplate, &testCases, &execTimeLimit, &memLimit)
+		if err != nil {
+			log.Printf("GetNextQuestion: no coding_details for question %s: %v", id, err)
+		} else {
+			// Filter out hidden test cases before sending to frontend
+			var allTests []map[string]interface{}
+			var visibleTests []map[string]interface{}
+			if err := json.Unmarshal(testCases, &allTests); err == nil {
+				for _, tc := range allTests {
+					if hidden, _ := tc["hidden"].(bool); hidden {
+						continue
+					}
+					if hidden, _ := tc["is_hidden"].(bool); hidden {
+						continue
+					}
+					visibleTests = append(visibleTests, tc)
+				}
+			}
+			filteredTests, _ := json.Marshal(visibleTests)
+
+			details := map[string]interface{}{
+				"language":             lang,
+				"code_template":        codeTemplate,
+				"test_cases":           json.RawMessage(filteredTests),
+				"execution_time_limit": execTimeLimit,
+				"memory_limit":         memLimit,
+			}
+			qMap["coding_details"] = details
+		}
+	}
+
 	return qMap, nil
 }
 
@@ -248,16 +295,143 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 	// 4. Perform the INSERT
 	newAnswerID := uuid.New()
 
-	// Note: I added 'is_correct' to the column list and the values ($7)
 	query := `
         INSERT INTO quiz_answers (
             id, quiz_attempt_id, question_id, user_answer, time_spent_seconds, is_skipped, is_correct, created_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (quiz_attempt_id, question_id)
+        DO UPDATE SET
+            user_answer = EXCLUDED.user_answer,
+            is_correct = EXCLUDED.is_correct,
+            time_spent_seconds = quiz_answers.time_spent_seconds + EXCLUDED.time_spent_seconds,
+            is_skipped = EXCLUDED.is_skipped,
+            save_count = quiz_answers.save_count + 1,
+            last_saved_at = NOW(),
+            updated_at = NOW()
     `
 
 	_, err = s.pool.Exec(ctx, query, newAnswerID, attemptUUID, questionUUID, answer, timeSpent, isSkipped, isCorrect)
 
 	return err
+}
+
+// RunQuizCode executes user code against visible test cases for a coding_challenge question
+func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, questionID, language, code string) (*models.ExecuteResponse, error) {
+	_, err := uuid.Parse(attemptID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid attempt ID: %w", err)
+	}
+
+	questionUUID, err := uuid.Parse(questionID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid question ID: %w", err)
+	}
+
+	// First verify the question exists and is a coding_challenge
+	var qType string
+	err = s.pool.QueryRow(ctx, `SELECT question_type FROM questions WHERE id = $1`, questionUUID).Scan(&qType)
+	if err != nil {
+		return nil, fmt.Errorf("question not found: %w", err)
+	}
+	if qType != "coding_challenge" {
+		return nil, fmt.Errorf("question type is %q, not coding_challenge", qType)
+	}
+
+	var dbLang string
+	var testCases json.RawMessage
+	var execTimeLimit, memLimit int
+
+	err = s.pool.QueryRow(ctx, `
+		SELECT language, test_cases, execution_time_limit, memory_limit
+		FROM coding_questions
+		WHERE question_id = $1
+	`, questionUUID).Scan(&dbLang, &testCases, &execTimeLimit, &memLimit)
+	if err != nil {
+		return nil, fmt.Errorf("coding_challenge data not found: the question exists but has no test cases configured in the coding_questions table (missing row for question_id=%s)", questionID)
+	}
+
+	// Use provided language or fall back to DB language
+	lang := language
+	if lang == "" {
+		lang = dbLang
+	}
+
+	// Filter to only visible test cases and convert to sandbox format {func, args, expected}
+	var allTests []map[string]interface{}
+	if err := json.Unmarshal(testCases, &allTests); err != nil {
+		return nil, fmt.Errorf("invalid test cases: %w", err)
+	}
+
+	var sandboxTests []map[string]interface{}
+	for _, tc := range allTests {
+		if hidden, _ := tc["hidden"].(bool); hidden {
+			continue
+		}
+		if hidden, _ := tc["is_hidden"].(bool); hidden {
+			continue
+		}
+		// Convert {input, expected_output} to {func, args, expected}
+		fn, _ := tc["func"].(string)
+		if fn == "" {
+			fn = "solution"
+		}
+		args := tc["args"]
+		if args == nil {
+			if input, ok := tc["input"]; ok {
+				args = input
+			}
+		}
+		expected := tc["expected"]
+		if expected == nil {
+			expected = tc["expected_output"]
+		}
+		if expected == nil {
+			expected = tc["output"]
+		}
+		sandboxTests = append(sandboxTests, map[string]interface{}{
+			"func":     fn,
+			"args":     args,
+			"expected": expected,
+		})
+	}
+
+	sandboxTestsJSON, _ := json.Marshal(sandboxTests)
+
+	// Execute code via sandbox using function execution type
+	sandbox := &SandboxService{}
+	req := models.ExecuteRequest{
+		Language:    lang,
+		Code:        code,
+		Type:        models.ExecutionTypeFunction,
+		Stdin:       string(sandboxTestsJSON),
+		TimeLimit:   execTimeLimit,
+		MemoryLimit: memLimit,
+	}
+
+	resp, err := sandbox.Execute(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox execution failed: %w", err)
+	}
+
+	// Save result to quiz_answers
+	isCorrect := resp.Passed != nil && *resp.Passed
+	_, upsertErr := s.pool.Exec(ctx, `
+		INSERT INTO quiz_answers (quiz_attempt_id, question_id, user_answer, is_correct, code_output, execution_time_ms, save_count, last_saved_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 1, NOW())
+		ON CONFLICT (quiz_attempt_id, question_id) DO UPDATE SET
+			user_answer = EXCLUDED.user_answer,
+			is_correct = EXCLUDED.is_correct,
+			code_output = EXCLUDED.code_output,
+			execution_time_ms = EXCLUDED.execution_time_ms,
+			save_count = quiz_answers.save_count + 1,
+			last_saved_at = NOW(),
+			updated_at = NOW()
+	`, attemptID, questionUUID, code, isCorrect, resp.Stdout, resp.TimeMs)
+	if upsertErr != nil {
+		log.Printf("RunQuizCode: failed to save quiz_answer: %v", upsertErr)
+	}
+
+	return resp, nil
 }
 
 // SubmitQuizAttempt calculates and locks progress finality status safely
