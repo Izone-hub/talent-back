@@ -118,12 +118,24 @@ func (s *JobService) GetPublishedJob(ctx context.Context, jobID uuid.UUID) (*mod
 }
 
 // ListPublishedJobs returns a paginated list of published jobs for the public
-// job board.
-func (s *JobService) ListPublishedJobs(ctx context.Context, limit, offset int) ([]models.Job, error) {
-	dbJobs, err := s.queries.ListPublishedJobs(ctx, database.ListPublishedJobsParams{
-		Limit:  int32(limit),
-		Offset: int32(offset),
-	})
+// job board. If userID is provided, it filters out jobs the user has already applied for.
+func (s *JobService) ListPublishedJobs(ctx context.Context, userID *uuid.UUID, limit, offset int) ([]models.Job, error) {
+	var dbJobs []database.Job
+	var err error
+
+	if userID != nil {
+		dbJobs, err = s.queries.ListPublishedJobsUnapplied(ctx, database.ListPublishedJobsUnappliedParams{
+			UserID: uuidToPgUUID(*userID),
+			Limit:  int32(limit),
+			Offset: int32(offset),
+		})
+	} else {
+		dbJobs, err = s.queries.ListPublishedJobs(ctx, database.ListPublishedJobsParams{
+			Limit:  int32(limit),
+			Offset: int32(offset),
+		})
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to list published jobs: %w", err)
 	}

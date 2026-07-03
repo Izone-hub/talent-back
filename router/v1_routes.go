@@ -31,7 +31,7 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Job routes
 	// -----------------------------------------------------------------------
-	mux.HandleFunc("GET /api/v1/jobs", jobController.ListPublishedJobs)
+	mux.HandleFunc("GET /api/v1/jobs", authMiddleware.OptionalAuthenticate(jobController.ListPublishedJobs))
 	mux.HandleFunc("GET /api/v1/jobs/{id}", jobController.GetPublishedJob)
 	mux.HandleFunc("POST /api/v1/jobs", authMiddleware.Authenticate(jobController.CreateJob))
 	mux.HandleFunc("GET /api/v1/jobs/my", authMiddleware.Authenticate(jobController.ListMyJobs))

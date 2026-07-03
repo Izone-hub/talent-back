@@ -408,6 +408,70 @@ func (q *Queries) ListPublishedJobs(ctx context.Context, arg ListPublishedJobsPa
 	return items, nil
 }
 
+const listPublishedJobsUnapplied = `-- name: ListPublishedJobsUnapplied :many
+SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at FROM jobs
+WHERE status = 'published'
+  AND id NOT IN (
+    SELECT job_id FROM job_applications WHERE user_id = $1
+  )
+ORDER BY published_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListPublishedJobsUnappliedParams struct {
+	UserID pgtype.UUID
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListPublishedJobsUnapplied(ctx context.Context, arg ListPublishedJobsUnappliedParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, listPublishedJobsUnapplied, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Company,
+			&i.CompanyLogo,
+			&i.CompanyWebsite,
+			&i.CompanyLocation,
+			&i.Description,
+			&i.Requirements,
+			&i.Responsibilities,
+			&i.Benefits,
+			&i.JobType,
+			&i.ExperienceLevel,
+			&i.Location,
+			&i.RemotePossible,
+			&i.SalaryMin,
+			&i.SalaryMax,
+			&i.SalaryCurrency,
+			&i.Status,
+			&i.PublishedAt,
+			&i.ClosedAt,
+			&i.ArchivedAt,
+			&i.ExpiresAt,
+			&i.PostedBy,
+			&i.ViewsCount,
+			&i.ApplicationsCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const publishJob = `-- name: PublishJob :one
 UPDATE jobs
 SET status = 'published',

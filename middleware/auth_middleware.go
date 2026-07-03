@@ -50,6 +50,33 @@ func (m *AuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// OptionalAuthenticate middleware validates JWT token if present, but doesn't fail if absent
+func (m *AuthMiddleware) OptionalAuthenticate(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		tokenString := parts[1]
+		claims, err := m.authService.ValidateToken(tokenString)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), "user", claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	}
+}
+
 // RequireAdmin middleware checks if user has admin role
 func (m *AuthMiddleware) RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
