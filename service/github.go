@@ -139,6 +139,59 @@ func (s *GithubService) GetUser(ctx context.Context, accessToken string) (*GitHu
 		return nil, fmt.Errorf("failed to decode user response: %w", err)
 	}
 
+	// If email is private, it might be empty. Fetch from /user/emails
+	if githubUser.Email == "" {
+		fmt.Println("GitHub email is empty from /user endpoint. Attempting to fetch from /user/emails...")
+		emailReq, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/emails", nil)
+		if err == nil {
+			emailReq.Header.Set("Authorization", "Bearer "+accessToken)
+			emailReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+			emailResp, err := s.httpClient.Do(emailReq)
+			if err != nil {
+				fmt.Printf("Error fetching emails: %v\n", err)
+			} else {
+				fmt.Printf("GitHub /user/emails returned status: %d\n", emailResp.StatusCode)
+				if emailResp.StatusCode == http.StatusOK {
+					type GitHubEmail struct {
+						Email    string `json:"email"`
+						Primary  bool   `json:"primary"`
+						Verified bool   `json:"verified"`
+					}
+					var emails []GitHubEmail
+					if err := json.NewDecoder(emailResp.Body).Decode(&emails); err == nil {
+						fmt.Printf("Decoded emails: %+v\n", emails)
+						for _, e := range emails {
+							if e.Primary && e.Verified {
+								githubUser.Email = e.Email
+								break
+							}
+						}
+						// Fallback to any verified email if primary isn't found
+						if githubUser.Email == "" {
+							for _, e := range emails {
+								if e.Verified {
+									githubUser.Email = e.Email
+									break
+								}
+							}
+						}
+						// Fallback to any email at all
+						if githubUser.Email == "" && len(emails) > 0 {
+							githubUser.Email = emails[0].Email
+						}
+						fmt.Printf("Selected email: %s\n", githubUser.Email)
+					} else {
+						fmt.Printf("Failed to decode emails: %v\n", err)
+					}
+				}
+				emailResp.Body.Close()
+			}
+		} else {
+			fmt.Printf("Failed to create email request: %v\n", err)
+		}
+	}
+
 	return &githubUser, nil
 }
 
