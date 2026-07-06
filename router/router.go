@@ -2,6 +2,8 @@ package router
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/Izone-hub/talent-backend/controller"
 	"github.com/Izone-hub/talent-backend/middleware"
@@ -16,6 +18,7 @@ func NewRouter(
 	questionController *controller.QuestionController,
 	quizController *controller.QuizController,
 	appController *controller.ApplicationController,
+	sandboxController *controller.SandboxController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -37,9 +40,19 @@ func NewRouter(
 	})
 
 	// -----------------------------------------------------------------------
+	// Serve sandbox test frontend
+	// -----------------------------------------------------------------------
+	staticDir, _ := filepath.Abs("static")
+	if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
+		fs := http.FileServer(http.Dir(staticDir))
+		mux.Handle("GET /sandbox-test", http.StripPrefix("/sandbox-test", fs))
+		mux.Handle("GET /sandbox-test/", http.StripPrefix("/sandbox-test", fs))
+	}
+
+	// -----------------------------------------------------------------------
 	// Mount v1 routes directly (Absolute path mapping)
 	// -----------------------------------------------------------------------
-	v1Mux := V1Routes(authController, jobController, cvController, tagController, questionController, quizController, appController, authMiddleware)
+	v1Mux := V1Routes(authController, jobController, cvController, tagController, questionController, quizController, appController, sandboxController, authMiddleware)
 	mux.Handle("/api/v1/", v1Mux)
 
 	return mux

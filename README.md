@@ -7,29 +7,49 @@
 ### Prerequisites
 - Go 1.22+
 - PostgreSQL 13+
-- Redis (optional, for caching)
-- Docker & Docker Compose (for easy setup)
+- Docker & Docker Compose (for easy sandbox setup)
 
-### 1. Setup Database
+### 1. Sandbox Setup (Recommended)
 
-We use **sqlc** for type-safe database access.
-
+Build custom sandbox Docker images (Go, TypeScript):
 ```bash
-# Generate Go code from SQL
-sqlc generate
+docker build -t sandbox-go:1.25 -f templates/Dockerfile.sandbox-go .
+docker build -t sandbox-node:22 -f templates/Dockerfile.sandbox-node .
 ```
 
-### 2. Run the Server
+Start a local PostgreSQL and load sample data:
 
 ```bash
+# Start PostgreSQL
+docker compose up -d
+
+# The seed.sql is auto-loaded on first start.
+# It creates sample users, jobs, tags, and 15 quiz questions.
+
+# Run the server
+go run .
+```
+
+### 2. Manual Setup
+
+```bash
+# Configure your .env file with database credentials
+cp .env.example .env
+# Edit .env with your PostgreSQL connection details
+
+# Run migrations
+go run github.com/pressly/goose/v3/cmd/goose -dir sql/schema postgres "$DATABASE_URL" up
+
+# Load sample data (optional)
+psql "$DATABASE_URL" -f scripts/seed.sql
+
 # Run the application
 go run .
 ```
 
 ### 3. API Documentation
 
-- **Swagger UI**: http://localhost:5000/swagger/index.html
-- **Health Check**: http://localhost:5000/health
+- **Health Check**: http://localhost:5000
 
 ## 📂 Project Structure
 
@@ -142,6 +162,16 @@ go test ./...
 - `POST /api/v1/questions` - Create question (admin)
 - `PUT /api/v1/questions/{id}` - Update question (admin)
 - `DELETE /api/v1/questions/{id}` - Delete question (admin)
+
+### Quiz (Skill Assessment)
+- `GET /api/v1/quizzes` - List my quiz attempts
+- `GET /api/v1/quizzes/{id}` - Get quiz attempt details
+- `POST /api/v1/quizzes/{id}/start` - Start a new quiz (10 questions)
+- `GET /api/v1/quizzes/{id}/question` - Get next random question
+- `POST /api/v1/quizzes/{id}/answer` - Save answer for current question
+- `POST /api/v1/quizzes/{id}/submit` - Submit and score the quiz
+
+Each quiz picks **10 random questions** from the database. Questions are served one at a time in random order. After all 10 are answered, the quiz is scored and the application status is updated.
 
 ## 🔐 Role-Based Access Control
 

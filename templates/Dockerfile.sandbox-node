@@ -1,0 +1,2 @@
+FROM node:22-slim
+RUN npm install -g tsx typescript 2>/dev/null

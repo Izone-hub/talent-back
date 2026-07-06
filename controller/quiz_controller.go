@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -16,6 +17,7 @@ func NewQuizController(qs *service.QuizService) *QuizController {
 	return &QuizController{quizService: qs}
 }
 
+// 1. ListQuizzes handler
 func (c *QuizController) ListQuizzes(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -34,6 +36,7 @@ func (c *QuizController) ListQuizzes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, quizzes)
 }
 
+// 2. GetQuiz handler
 func (c *QuizController) GetQuiz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -53,6 +56,7 @@ func (c *QuizController) GetQuiz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, quiz)
 }
 
+// 3. StartQuiz handler
 func (c *QuizController) StartQuiz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -63,7 +67,19 @@ func (c *QuizController) StartQuiz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	err := c.quizService.StartQuizAttempt(r.Context(), id, claims.UserID.String())
+
+	// Decode from Request Body (This is the dynamic way!)
+	var req struct {
+		ApplicationID string `json:"application_id"`
+		JobID         string `json:"job_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Use the IDs from the request body
+	err := c.quizService.StartQuizAttempt(r.Context(), id, claims.UserID.String(), req.ApplicationID, req.JobID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Failed to start quiz: "+err.Error())
 		return
@@ -72,7 +88,8 @@ func (c *QuizController) StartQuiz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Quiz started successfully"})
 }
 
-func (c *QuizController) GetQuizQuestions(w http.ResponseWriter, r *http.Request) {
+// 4. GetNextQuestion handler (Replaces the bulk list endpoint)
+func (c *QuizController) GetNextQuestion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	claims, ok := r.Context().Value("user").(*service.Claims)
@@ -81,38 +98,62 @@ func (c *QuizController) GetQuizQuestions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	id := r.PathValue("id")
+	quizID := r.PathValue("id")
+	log.Printf("GetNextQuestion called: quizID=%s, userID=%s", quizID, claims.UserID.String())
 
-	// Read Quiz Attempt info first to get tags (which contains Gemini microservice selected tags)
-	quiz, err := c.quizService.GetQuizAttempt(r.Context(), id, claims.UserID.String())
+	question, err := c.quizService.GetNextQuestion(r.Context(), quizID, claims.UserID.String())
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Quiz attempt context missing: "+err.Error())
-		return
-	}
-
-	// Convert comma-separated tags to []string
-	var targetTags []string
-	if quiz.Type != "" && quiz.Type != "General" {
-		tagsRaw := strings.Split(quiz.Type, ",")
-		for _, t := range tagsRaw {
-			trimmed := strings.TrimSpace(t)
-			if trimmed != "" {
-				targetTags = append(targetTags, trimmed)
-			}
+		log.Printf("GetNextQuestion error: %v", err)
+		if err.Error() == "no rows in result set" {
+			writeJSON(w, http.StatusOK, map[string]string{
+				"status":  "finished",
+				"message": "No more questions available or quiz completed",
+			})
+		} else {
+			writeError(w, http.StatusInternalServerError, "Failed to get question: "+err.Error())
 		}
-	}
-
-	// Provide the filtered tags to the service
-	questions, err := c.quizService.GetQuizQuestions(r.Context(), id, claims.UserID.String(), targetTags)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to fetch quiz questions: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, questions)
+	writeJSON(w, http.StatusOK, question)
 }
 
+// 5. SaveAnswer handler
+// 5. SaveAnswer handler
 func (c *QuizController) SaveAnswer(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+
+    claims, ok := r.Context().Value("user").(*service.Claims)
+    if !ok {
+        writeError(w, http.StatusUnauthorized, "Unauthorized")
+        return
+    }
+
+    id := r.PathValue("id")
+
+    var req struct {
+        QuestionID       string `json:"question_id"`
+        UserAnswer       string `json:"user_answer"`
+        TimeSpentSeconds int    `json:"time_spent_seconds"`
+        IsSkipped        bool   `json:"is_skipped"`
+    }
+
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        writeError(w, http.StatusBadRequest, "Invalid request payload: "+err.Error())
+        return
+    }
+
+    // Call the Service layer (which handles the DB check)
+    err := c.quizService.SaveQuizAnswer(r.Context(), id, claims.UserID.String(), req.QuestionID, req.UserAnswer, req.TimeSpentSeconds, req.IsSkipped)
+    if err != nil {
+        writeError(w, http.StatusInternalServerError, "Failed to save answer: "+err.Error())
+        return
+    }
+
+    writeJSON(w, http.StatusOK, map[string]string{"message": "Answer saved successfully"})
+}
+// 6. RunCode handler (for coding_challenge questions)
+func (c *QuizController) RunCode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	claims, ok := r.Context().Value("user").(*service.Claims)
@@ -124,10 +165,9 @@ func (c *QuizController) SaveAnswer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var req struct {
-		QuestionID       string `json:"question_id"`
-		UserAnswer       string `json:"user_answer"`
-		TimeSpentSeconds int    `json:"time_spent_seconds"`
-		IsSkipped        bool   `json:"is_skipped"`
+		QuestionID string `json:"question_id"`
+		Language   string `json:"language"`
+		Code       string `json:"code"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -135,15 +175,23 @@ func (c *QuizController) SaveAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := c.quizService.SaveQuizAnswer(r.Context(), id, claims.UserID.String(), req.QuestionID, req.UserAnswer, req.TimeSpentSeconds, req.IsSkipped)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save answer: "+err.Error())
+	if req.QuestionID == "" {
+		writeError(w, http.StatusBadRequest, "question_id is required")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Answer saved successfully"})
+	log.Printf("RunCode: attemptID=%s, userID=%s, questionID=%s, lang=%s", id, claims.UserID.String(), req.QuestionID, req.Language)
+
+	result, err := c.quizService.RunQuizCode(r.Context(), id, req.QuestionID, req.Language, req.Code)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
+// 7. SubmitQuiz handler
 func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -155,7 +203,6 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 
-	// Fetch attempt tags to filter questions again during calculation
 	quiz, err := c.quizService.GetQuizAttempt(r.Context(), id, claims.UserID.String())
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Quiz attempt context missing: "+err.Error())
@@ -173,7 +220,6 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Call the updated service with the new argument
 	err = c.quizService.SubmitQuizAttempt(r.Context(), id, claims.UserID.String(), targetTags)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to submit quiz: "+err.Error())
@@ -183,5 +229,5 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Quiz submitted successfully"})
 }
 
-// Helper functions writeError and writeJSON to be uniform (if not defined elsewhere)
-
+// --- Uniform Helper Fallbacks ---
+// If these are defined in another file within package controller, delete them from here.

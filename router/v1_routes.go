@@ -15,6 +15,7 @@ func V1Routes(
 	questionController *controller.QuestionController,
 	quizController *controller.QuizController,
 	appController *controller.ApplicationController,
+	sandboxController *controller.SandboxController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -39,13 +40,23 @@ func V1Routes(
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/close", authMiddleware.Authenticate(jobController.CloseJob))
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/archive", authMiddleware.Authenticate(jobController.ArchiveJob))
 	mux.HandleFunc("POST /api/v1/jobs/{id}/apply", authMiddleware.Authenticate(appController.ApplyForJob))
-	mux.HandleFunc("GET /api/v1/jobs/{id}/applications", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetJobApplications)))
 
 	// -----------------------------------------------------------------------
 	// Application routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/applications/my", authMiddleware.Authenticate(appController.GetMyApplications))
+	mux.HandleFunc("GET /api/v1/applications/recent", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetRecentApplications)))
+	mux.HandleFunc("GET /api/v1/applications/status/{status}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.ListApplicationsByStatus)))
+	mux.HandleFunc("GET /api/v1/applications/{id}", authMiddleware.Authenticate(appController.GetApplicationDetail))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/review", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.StartReview)))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/shortlist", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.ShortlistApplication)))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/interview", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.MarkInterviewed)))
 	mux.HandleFunc("PATCH /api/v1/applications/{id}/accept", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.AcceptApplication)))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/reject", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.RejectApplication)))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/withdraw", authMiddleware.Authenticate(appController.WithdrawApplication))
+	mux.HandleFunc("PATCH /api/v1/applications/{id}/feedback", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.AddEmployerFeedback)))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/applications", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetJobApplications)))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/applications/counts", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetApplicationCountsByJob)))
 
 	// -----------------------------------------------------------------------
 	// CV routes — Protected
@@ -59,34 +70,61 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Tags routes
 	// -----------------------------------------------------------------------
-	mux.HandleFunc("GET /api/v1/tags", tagController.ListTags)
+	mux.HandleFunc("GET /api/v1/tags", authMiddleware.Authenticate(tagController.ListTags))
 	mux.HandleFunc("POST /api/v1/tags", authMiddleware.Authenticate(tagController.CreateTag))
-	mux.HandleFunc("GET /api/v1/tags/{id}", tagController.GetTag)
+	mux.HandleFunc("GET /api/v1/tags/{id}", authMiddleware.Authenticate(tagController.GetTag))
 	mux.HandleFunc("PUT /api/v1/tags/{id}", authMiddleware.Authenticate(tagController.UpdateTag))
 	mux.HandleFunc("DELETE /api/v1/tags/{id}", authMiddleware.Authenticate(tagController.DeleteTag))
-	mux.HandleFunc("POST /api/v1/tags/assign", authMiddleware.Authenticate(tagController.AssignTagToJob))
-	mux.HandleFunc("POST /api/v1/tags/remove", authMiddleware.Authenticate(tagController.RemoveTagFromJob))
-	mux.HandleFunc("GET /api/v1/tags/{id}/jobs", tagController.GetTagJobs)
-	mux.HandleFunc("GET /api/v1/jobs/{id}/tags", tagController.GetJobTags)
+	mux.HandleFunc("POST /api/v1/tags/assign", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.AssignTagToJob)))
+	mux.HandleFunc("POST /api/v1/tags/remove", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.RemoveTagFromJob)))
+	mux.HandleFunc("GET /api/v1/tags/{id}/jobs", authMiddleware.Authenticate(tagController.GetTagJobs))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/tags", authMiddleware.Authenticate(tagController.GetJobTags))
 
 	// -----------------------------------------------------------------------
 	// Question routes
 	// -----------------------------------------------------------------------
-	mux.HandleFunc("GET /api/v1/questions", questionController.ListQuestions)
-	mux.HandleFunc("GET /api/v1/questions/{id}", questionController.GetQuestion)
+	// Secure GET routes
+	mux.HandleFunc("GET /api/v1/questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.ListQuestions)))
+
+	mux.HandleFunc("GET /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.GetQuestion)))
+
 	mux.HandleFunc("POST /api/v1/questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.CreateQuestion)))
+
 	mux.HandleFunc("PUT /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.UpdateQuestion)))
+
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.DeleteQuestion)))
 
 	// -----------------------------------------------------------------------
 	// Quiz routes
 	// -----------------------------------------------------------------------
+	// 1. List all quizzes for the user
 	mux.HandleFunc("GET /api/v1/quizzes", authMiddleware.Authenticate(quizController.ListQuizzes))
+
+	// 2. View details of a specific quiz attempt
 	mux.HandleFunc("GET /api/v1/quizzes/{id}", authMiddleware.Authenticate(quizController.GetQuiz))
+
+	// 3. Start the quiz (creates the attempt record)
 	mux.HandleFunc("POST /api/v1/quizzes/{id}/start", authMiddleware.Authenticate(quizController.StartQuiz))
-	mux.HandleFunc("GET /api/v1/quizzes/{id}/questions", authMiddleware.Authenticate(quizController.GetQuizQuestions))
+
+	// 4. Fetch ONLY the next question (Replaces the bulk list)
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/question", authMiddleware.Authenticate(quizController.GetNextQuestion))
+
+	// 5. Submit an answer for the current question
 	mux.HandleFunc("POST /api/v1/quizzes/{id}/answer", authMiddleware.Authenticate(quizController.SaveAnswer))
+
+	// 6. Run code for coding_challenge questions
+	mux.HandleFunc("POST /api/v1/quizzes/{id}/run-code", authMiddleware.Authenticate(quizController.RunCode))
+
+	// 7. Finish and score the quiz
 	mux.HandleFunc("POST /api/v1/quizzes/{id}/submit", authMiddleware.Authenticate(quizController.SubmitQuiz))
+	// Example registration in main.go
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/next", authMiddleware.Authenticate(quizController.GetNextQuestion))
+
+	// -----------------------------------------------------------------------
+	// Sandbox / Judge routes
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /api/v1/sandbox/languages", authMiddleware.Authenticate(sandboxController.ListLanguages))
+	mux.HandleFunc("POST /api/v1/sandbox/execute", authMiddleware.Authenticate(sandboxController.Execute))
 
 	// -----------------------------------------------------------------------
 	// Admin routes

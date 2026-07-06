@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,7 +117,9 @@ type QuestionResponse struct {
 }
 
 func (r *CreateQuestionRequest) Validate() error {
-	// Basic validation logic
+	if r.QuestionType == QuestionTypeCodingChallenge && r.CodingDetails == nil {
+		return fmt.Errorf("coding_details is required for coding_challenge questions")
+	}
 	return nil
 }
 

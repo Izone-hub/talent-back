@@ -29,8 +29,11 @@ func strPtrToPgText(s *string) pgtype.Text {
 	return pgtype.Text{String: *s, Valid: true}
 }
 
-// strToPgText converts a string to a pgtype.Text.
+// strToPgText converts a string to a pgtype.Text, treating empty strings as NULL.
 func strToPgText(s string) pgtype.Text {
+	if s == "" {
+		return pgtype.Text{Valid: false}
+	}
 	return pgtype.Text{String: s, Valid: true}
 }
 
