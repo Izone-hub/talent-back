@@ -158,11 +158,6 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 func (s *AuthService) upsertUserFromGitHub(ctx context.Context, githubUser *GitHubUser, tokenResponse *GitHubTokenResponse, topLanguages []string) (database.User, error) {
 	expiresAt := time.Now().AddDate(1, 0, 0)
 
-	// Convert topLanguages slice to PostgreSQL array
-	var topLanguagesArray []string
-	if len(topLanguages) > 0 {
-		topLanguagesArray = topLanguages
-	}
 
 	return s.queries.CreateOrUpdateUser(ctx, database.CreateOrUpdateUserParams{
 		GithubID:             githubUser.ID,
@@ -172,17 +167,12 @@ func (s *AuthService) upsertUserFromGitHub(ctx context.Context, githubUser *GitH
 		Name:                 strToPgText(githubUser.Name),
 		GithubAccessToken:    strToPgText(tokenResponse.AccessToken),
 		GithubTokenExpiresAt: pgtype.Timestamp{Time: expiresAt, Valid: true},
-		PublicRepos:          pgtype.Int4{Int32: int32(githubUser.PublicRepos), Valid: true},
-		PublicGists:          pgtype.Int4{Int32: int32(githubUser.PublicGists), Valid: true},
-		Followers:            pgtype.Int4{Int32: int32(githubUser.Followers), Valid: true},
-		Following:            pgtype.Int4{Int32: int32(githubUser.Following), Valid: true},
 		Hireable:             pgtype.Bool{Bool: githubUser.Hireable, Valid: true},
 		Blog:                 strToPgText(githubUser.Blog),
 		Company:              strToPgText(githubUser.Company),
 		Location:             strToPgText(githubUser.Location),
 		Bio:                  strToPgText(githubUser.Bio),
 		TwitterUsername:      strToPgText(githubUser.TwitterUsername),
-		TopLanguages:         topLanguagesArray,
 	})
 }
 
@@ -205,17 +195,12 @@ func dbUserToModel(u database.User) models.User {
 		LastLoginAt:          pgTimestampToTime(u.LastLoginAt),
 		CreatedAt:            pgTimestampToTime(u.CreatedAt),
 		UpdatedAt:            pgTimestampToTime(u.UpdatedAt),
-		PublicRepos:          int(u.PublicRepos.Int32),
-		PublicGists:          int(u.PublicGists.Int32),
-		Followers:            int(u.Followers.Int32),
-		Following:            int(u.Following.Int32),
 		Hireable:             u.Hireable.Bool,
 		Blog:                 pgTextToStrPtr(u.Blog),
 		Company:              pgTextToStrPtr(u.Company),
 		Location:             pgTextToStrPtr(u.Location),
 		Bio:                  pgTextToStrPtr(u.Bio),
 		TwitterUsername:      pgTextToStrPtr(u.TwitterUsername),
-		TopLanguages:         u.TopLanguages,
 	}
 }
 

@@ -1,3 +1,4 @@
+-- +goose Up
 -- Sandbox execution tables for code judge system
 
 CREATE TABLE IF NOT EXISTS sandbox_templates (
@@ -30,3 +31,7 @@ CREATE TABLE IF NOT EXISTS submissions (
 CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_question_id ON submissions(question_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_submitted_at ON submissions(submitted_at DESC);
+
+-- +goose Down
+DROP TABLE IF EXISTS submissions;
+DROP TABLE IF EXISTS sandbox_templates;

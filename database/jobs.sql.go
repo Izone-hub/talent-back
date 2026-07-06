@@ -409,12 +409,13 @@ func (q *Queries) ListPublishedJobs(ctx context.Context, arg ListPublishedJobsPa
 }
 
 const listPublishedJobsUnapplied = `-- name: ListPublishedJobsUnapplied :many
-SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at FROM jobs
-WHERE status = 'published'
-  AND id NOT IN (
-    SELECT job_id FROM job_applications WHERE user_id = $1
+SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at FROM jobs j
+WHERE j.status = 'published'
+  AND NOT EXISTS (
+      SELECT 1 FROM job_applications a
+      WHERE a.job_id = j.id AND a.user_id = $1
   )
-ORDER BY published_at DESC
+ORDER BY j.published_at DESC
 LIMIT $2 OFFSET $3
 `
 
