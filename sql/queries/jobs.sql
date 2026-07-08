@@ -73,3 +73,13 @@ RETURNING *;
 
 -- name: IncrementJobViews :exec
 UPDATE jobs SET views_count = views_count + 1 WHERE id = $1;
+
+-- name: ListPublishedJobsUnapplied :many
+SELECT j.* FROM jobs j
+WHERE j.status = 'published'
+  AND NOT EXISTS (
+      SELECT 1 FROM job_applications a
+      WHERE a.job_id = j.id AND a.user_id = $1
+  )
+ORDER BY j.published_at DESC
+LIMIT $2 OFFSET $3;

@@ -16,6 +16,7 @@ func V1Routes(
 	quizController *controller.QuizController,
 	appController *controller.ApplicationController,
 	sandboxController *controller.SandboxController,
+	intelligenceController *controller.IntelligenceController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -31,7 +32,7 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Job routes
 	// -----------------------------------------------------------------------
-	mux.HandleFunc("GET /api/v1/jobs", jobController.ListPublishedJobs)
+	mux.HandleFunc("GET /api/v1/jobs", authMiddleware.OptionalAuthenticate(jobController.ListPublishedJobs))
 	mux.HandleFunc("GET /api/v1/jobs/{id}", jobController.GetPublishedJob)
 	mux.HandleFunc("POST /api/v1/jobs", authMiddleware.Authenticate(jobController.CreateJob))
 	mux.HandleFunc("GET /api/v1/jobs/my", authMiddleware.Authenticate(jobController.ListMyJobs))
@@ -125,6 +126,11 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/sandbox/languages", authMiddleware.Authenticate(sandboxController.ListLanguages))
 	mux.HandleFunc("POST /api/v1/sandbox/execute", authMiddleware.Authenticate(sandboxController.Execute))
+
+	// -----------------------------------------------------------------------
+	// Intelligence routes
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("POST /api/v1/intelligence/github/{id}/fetch", authMiddleware.Authenticate(intelligenceController.FetchGitHubSnapshot))
 
 	// -----------------------------------------------------------------------
 	// Admin routes

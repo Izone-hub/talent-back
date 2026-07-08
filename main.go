@@ -89,6 +89,7 @@ func main() {
 	tagController := controller.NewTagController(tagService)
 	questionController := controller.NewQuestionController(questionService)
 	sandboxController := controller.NewSandboxController(sandboxService)
+	intelligenceController := controller.NewIntelligenceController(githubService, db)
 
 	// Initialize middleware
 	authMiddleware := middleware.NewAuthMiddleware(authService)
@@ -110,6 +111,7 @@ func main() {
 		quizController,
 		appController,
 		sandboxController,
+		intelligenceController,
 		authMiddleware,
 	)
 
