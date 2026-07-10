@@ -22,3 +22,5 @@ cache/
 # OS
 .DS_Store
 Thumbs.db
+uploads/*
+history/*

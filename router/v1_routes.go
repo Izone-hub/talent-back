@@ -131,6 +131,7 @@ func V1Routes(
 	// Intelligence routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("POST /api/v1/intelligence/github/{id}/fetch", authMiddleware.Authenticate(intelligenceController.FetchGitHubSnapshot))
+	mux.HandleFunc("POST /api/v1/analyze-cv", intelligenceController.AnalyzeCV)
 
 	// -----------------------------------------------------------------------
 	// Admin routes

@@ -11,11 +11,13 @@ import (
 
 type ApplicationController struct {
 	appService *service.ApplicationService
+	cvService  *service.CvService
 }
 
-func NewApplicationController(appService *service.ApplicationService) *ApplicationController {
+func NewApplicationController(appService *service.ApplicationService, cvService *service.CvService) *ApplicationController {
 	return &ApplicationController{
 		appService: appService,
+		cvService:  cvService,
 	}
 }
 
@@ -37,6 +39,10 @@ func (c *ApplicationController) ApplyForJob(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	if cv, err := c.cvService.GetCurrentCV(r.Context(), claims.UserID); err == nil {
+		go triggerCVAnalysis(cv.FilePath, cv.FileName, claims.GithubUsername)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

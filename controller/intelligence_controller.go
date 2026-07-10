@@ -1,14 +1,23 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/service"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const analyzeCVURL = "http://localhost:8000/analyze-cv"
 
 type IntelligenceController struct {
 	githubService *service.GithubService
@@ -148,6 +157,72 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(report)
+}
+
+func (c *IntelligenceController) AnalyzeCV(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "Failed to parse form: "+err.Error())
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Missing file field. Use form field name 'file'.")
+		return
+	}
+	defer file.Close()
+
+	githubUsername := r.FormValue("github_username")
+
+	var buf bytes.Buffer
+	mp := multipart.NewWriter(&buf)
+
+	fw, err := mp.CreateFormFile("file", filepath.Base(header.Filename))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create multipart writer")
+		return
+	}
+	if _, err := io.Copy(fw, file); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to copy file data")
+		return
+	}
+
+	if err := mp.WriteField("github_username", githubUsername); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to write form field")
+		return
+	}
+	mp.Close()
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Post(analyzeCVURL, mp.FormDataContentType(), &buf)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach analysis service: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read analysis response")
+		return
+	}
+
+	// Save to history file
+	historyDir := "history"
+	os.MkdirAll(historyDir, 0755)
+	stem := filepath.Base(header.Filename)
+	if ext := filepath.Ext(stem); ext != "" {
+		stem = stem[:len(stem)-len(ext)]
+	}
+	ts := time.Now().Unix()
+	historyPath := filepath.Join(historyDir, fmt.Sprintf("analyze_%s_%d.json", stem, ts))
+	os.WriteFile(historyPath, body, 0644)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(body)
 }
 
 // --- Helpers ---
