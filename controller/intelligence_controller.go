@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
@@ -148,7 +149,7 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 	aiSummary, err := c.queries.GetLatestAISummary(r.Context(), targetUserID)
 	if err == nil {
 		report.AISummary = &AISummaryResponse{
-			Summary:    aiSummary.Summary.String,
+			Summary:    string(aiSummary.Summary),
 			Strengths:  aiSummary.Strengths.String,
 			Weaknesses: aiSummary.Weaknesses.String,
 			Model:      aiSummary.Model.String,
@@ -220,9 +221,64 @@ func (c *IntelligenceController) AnalyzeCV(w http.ResponseWriter, r *http.Reques
 	historyPath := filepath.Join(historyDir, fmt.Sprintf("analyze_%s_%d.json", stem, ts))
 	os.WriteFile(historyPath, body, 0644)
 
+	// Store the full analyzer payload in the database.
+	var analysisResp struct {
+		Analysis json.RawMessage `json:"analysis"`
+		Response json.RawMessage `json:"response"`
+		Engine   string          `json:"engine"`
+	}
+	if err := json.Unmarshal(body, &analysisResp); err == nil {
+		var userID uuid.UUID
+		if githubUsername != "" {
+			if u, err := c.queries.GetUserByGitHubUsername(r.Context(), githubUsername); err == nil {
+				userID = uuid.UUID(u.ID.Bytes)
+			}
+		}
+		if userID != uuid.Nil {
+			analysisPayload := analysisResp.Analysis
+			if len(analysisPayload) == 0 {
+				analysisPayload = analysisResp.Response
+			}
+			if len(analysisPayload) == 0 {
+				analysisPayload = body
+			}
+
+			strengths, weaknesses := extractStrengthsWeaknesses(analysisPayload)
+			_, _ = c.queries.CreateAISummary(r.Context(), database.CreateAISummaryParams{
+				UserID:     userID,
+				Summary:    body,
+				Strengths:  pgtype.Text{String: strengths, Valid: strengths != ""},
+				Weaknesses: pgtype.Text{String: weaknesses, Valid: weaknesses != ""},
+				Model:      pgtype.Text{String: analysisResp.Engine, Valid: analysisResp.Engine != ""},
+			})
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
+}
+
+func extractStrengthsWeaknesses(response json.RawMessage) (string, string) {
+	var data struct {
+		Checks []struct {
+			Status  string `json:"status"`
+			Message string `json:"message"`
+			Detail  string `json:"detail"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(response, &data); err != nil {
+		return "", ""
+	}
+	var strengths, weaknesses []string
+	for _, c := range data.Checks {
+		if c.Status == "pass" {
+			strengths = append(strengths, c.Message)
+		} else if c.Status == "warn" || c.Status == "fail" {
+			weaknesses = append(weaknesses, c.Message)
+		}
+	}
+	return strings.Join(strengths, "; "), strings.Join(weaknesses, "; ")
 }
 
 // --- Helpers ---

@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS ai_summaries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  summary TEXT,
+  summary JSONB,
   strengths TEXT,
   weaknesses TEXT,
   model TEXT,

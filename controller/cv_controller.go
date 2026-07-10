@@ -126,7 +126,7 @@ func triggerCVAnalysis(filePath, fileName, githubUsername string) {
 	mp.Close()
 
 	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Post("http://localhost:8000/analyze-cv", mp.FormDataContentType(), &buf)
+	resp, err := client.Post("http://localhost:5000/api/v1/analyze-cv", mp.FormDataContentType(), &buf)
 	if err != nil {
 		return
 	}
