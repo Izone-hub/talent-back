@@ -99,7 +99,7 @@ func main() {
 	appService := service.NewApplicationService(db)
 
 	quizController := controller.NewQuizController(quizService)
-	appController := controller.NewApplicationController(appService)
+	appController := controller.NewApplicationController(appService, cvService)
 
 	// 2. Update the router creation call to pass it in
 	handler := router.NewRouter(
