@@ -475,7 +475,7 @@ type AdminAuditTrail struct {
 type AiSummary struct {
 	ID         pgtype.UUID
 	UserID     uuid.UUID
-	Summary    pgtype.Text
+	Summary    []byte
 	Strengths  pgtype.Text
 	Weaknesses pgtype.Text
 	Model      pgtype.Text

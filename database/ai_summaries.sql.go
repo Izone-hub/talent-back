@@ -26,7 +26,7 @@ RETURNING id, user_id, summary, strengths, weaknesses, model, created_at
 
 type CreateAISummaryParams struct {
 	UserID     uuid.UUID
-	Summary    pgtype.Text
+	Summary    []byte
 	Strengths  pgtype.Text
 	Weaknesses pgtype.Text
 	Model      pgtype.Text
