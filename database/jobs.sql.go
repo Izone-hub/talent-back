@@ -349,26 +349,67 @@ func (q *Queries) ListJobsByPoster(ctx context.Context, arg ListJobsByPosterPara
 }
 
 const listPublishedJobs = `-- name: ListPublishedJobs :many
-SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at FROM jobs
-WHERE status = 'published'
-ORDER BY published_at DESC
+SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at,
+       jsonb_build_object(
+           'applied', ja.id IS NOT NULL,
+           'application_id', ja.id,
+           'status', ja.status,
+           'submitted_at', ja.submitted_at
+       ) AS user_application
+FROM jobs j
+LEFT JOIN job_applications ja 
+    ON ja.job_id = j.id AND ja.user_id = $3
+WHERE j.status = 'published'
+ORDER BY j.published_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListPublishedJobsParams struct {
 	Limit  int32
 	Offset int32
+	UserID pgtype.UUID
 }
 
-func (q *Queries) ListPublishedJobs(ctx context.Context, arg ListPublishedJobsParams) ([]Job, error) {
-	rows, err := q.db.Query(ctx, listPublishedJobs, arg.Limit, arg.Offset)
+type ListPublishedJobsRow struct {
+	ID                pgtype.UUID
+	Title             string
+	Company           string
+	CompanyLogo       pgtype.Text
+	CompanyWebsite    pgtype.Text
+	CompanyLocation   pgtype.Text
+	Description       string
+	Requirements      string
+	Responsibilities  pgtype.Text
+	Benefits          pgtype.Text
+	JobType           JobType
+	ExperienceLevel   JobExperienceLevel
+	Location          pgtype.Text
+	RemotePossible    pgtype.Bool
+	SalaryMin         pgtype.Int4
+	SalaryMax         pgtype.Int4
+	SalaryCurrency    pgtype.Text
+	Status            JobStatus
+	PublishedAt       pgtype.Timestamp
+	ClosedAt          pgtype.Timestamp
+	ArchivedAt        pgtype.Timestamp
+	ExpiresAt         pgtype.Timestamp
+	PostedBy          pgtype.UUID
+	ViewsCount        pgtype.Int4
+	ApplicationsCount pgtype.Int4
+	CreatedAt         pgtype.Timestamp
+	UpdatedAt         pgtype.Timestamp
+	UserApplication   []byte
+}
+
+func (q *Queries) ListPublishedJobs(ctx context.Context, arg ListPublishedJobsParams) ([]ListPublishedJobsRow, error) {
+	rows, err := q.db.Query(ctx, listPublishedJobs, arg.Limit, arg.Offset, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Job
+	var items []ListPublishedJobsRow
 	for rows.Next() {
-		var i Job
+		var i ListPublishedJobsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,
@@ -397,6 +438,7 @@ func (q *Queries) ListPublishedJobs(ctx context.Context, arg ListPublishedJobsPa
 			&i.ApplicationsCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UserApplication,
 		); err != nil {
 			return nil, err
 		}
@@ -409,24 +451,20 @@ func (q *Queries) ListPublishedJobs(ctx context.Context, arg ListPublishedJobsPa
 }
 
 const listPublishedJobsUnapplied = `-- name: ListPublishedJobsUnapplied :many
-SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at FROM jobs j
+SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at 
+FROM jobs j
 WHERE j.status = 'published'
-  AND NOT EXISTS (
-      SELECT 1 FROM job_applications a
-      WHERE a.job_id = j.id AND a.user_id = $1
-  )
 ORDER BY j.published_at DESC
-LIMIT $2 OFFSET $3
+LIMIT $1 OFFSET $2
 `
 
 type ListPublishedJobsUnappliedParams struct {
-	UserID pgtype.UUID
 	Limit  int32
 	Offset int32
 }
 
 func (q *Queries) ListPublishedJobsUnapplied(ctx context.Context, arg ListPublishedJobsUnappliedParams) ([]Job, error) {
-	rows, err := q.db.Query(ctx, listPublishedJobsUnapplied, arg.UserID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listPublishedJobsUnapplied, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
