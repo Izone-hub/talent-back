@@ -175,7 +175,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	// Select a random unanswered question matching the job's tags
 	// Skip coding_challenge questions that have no data in coding_questions table
 	query := `
-        SELECT q.id, q.question_text, q.question_type, q.options, q.correct_answer, q.difficulty
+        SELECT q.id, q.question_text, q.question_type, q.options, q.correct_answer, q.difficulty, q.time_limit_seconds
         FROM questions q
         WHERE NOT EXISTS (
             SELECT 1 FROM quiz_answers qa 
@@ -201,18 +201,20 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	var id uuid.UUID
 	var qText, qType, difficulty string
 	var options, correctAnswer *string
+	var timeLimitSeconds int
 
-	err = s.pool.QueryRow(ctx, query, args...).Scan(&id, &qText, &qType, &options, &correctAnswer, &difficulty)
+	err = s.pool.QueryRow(ctx, query, args...).Scan(&id, &qText, &qType, &options, &correctAnswer, &difficulty, &timeLimitSeconds)
 	if err != nil {
 		log.Printf("GetNextQuestion ERROR for attemptID=%s: %v", attemptID, err)
 		return nil, err
 	}
 
 	qMap := map[string]interface{}{
-		"id":            id.String(),
-		"question_text": qText,
-		"question_type": qType,
-		"difficulty":    difficulty,
+		"id":                id.String(),
+		"question_text":     qText,
+		"question_type":     qType,
+		"difficulty":        difficulty,
+		"time_limit_seconds": timeLimitSeconds,
 	}
 
 	if options != nil {
@@ -284,15 +286,21 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 
 	// 2. Fetch the correct answer from the 'questions' table
 	var dbCorrectAnswer *string
-	err = s.pool.QueryRow(ctx, "SELECT correct_answer FROM questions WHERE id = $1", questionUUID).Scan(&dbCorrectAnswer)
+	var timeLimitSeconds int
+	err = s.pool.QueryRow(ctx, "SELECT correct_answer, time_limit_seconds FROM questions WHERE id = $1", questionUUID).Scan(&dbCorrectAnswer, &timeLimitSeconds)
 	if err != nil {
 		return fmt.Errorf("failed to fetch correct answer for validation: %w", err)
 	}
 
-	// 3. Determine if the user's answer is correct
+	// 3. Enforce time limit
+	if timeLimitSeconds > 0 && timeSpent > timeLimitSeconds {
+		return fmt.Errorf("time limit exceeded for this question (%d seconds)", timeLimitSeconds)
+	}
+
+	// 4. Determine if the user's answer is correct
 	isCorrect := dbCorrectAnswer != nil && answer == *dbCorrectAnswer
 
-	// 4. Perform the INSERT
+	// 5. Perform the INSERT
 	newAnswerID := uuid.New()
 
 	query := `

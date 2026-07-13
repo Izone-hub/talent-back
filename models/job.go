@@ -91,6 +91,17 @@ type Job struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 	Tags      []Tag     `json:"tags,omitempty" db:"-"`
+
+	// UserApplication contains application info if the current user has applied
+	UserApplication *JobUserApplication `json:"user_application,omitempty" db:"-"`
+}
+
+// JobUserApplication holds the user's application status for a job
+type JobUserApplication struct {
+	Applied       bool       `json:"applied"`
+	ApplicationID *uuid.UUID `json:"application_id,omitempty"`
+	Status        *string    `json:"status,omitempty"`
+	SubmittedAt   *time.Time `json:"submitted_at,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +219,7 @@ type JobResponse struct {
 	CreatedAt         time.Time          `json:"created_at"`
 	UpdatedAt         time.Time          `json:"updated_at"`
 	Tags              []Tag              `json:"tags,omitempty"`
+	UserApplication   *JobUserApplication `json:"user_application,omitempty"`
 }
 
 // JobListResponse wraps a paginated list of jobs.
@@ -247,5 +259,6 @@ func (j *Job) ToResponse() JobResponse {
 		CreatedAt:         j.CreatedAt,
 		UpdatedAt:         j.UpdatedAt,
 		Tags:              j.Tags,
+		UserApplication:   j.UserApplication,
 	}
 }
