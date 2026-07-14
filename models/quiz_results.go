@@ -7,8 +7,8 @@ import (
 )
 
 type QuizResults struct {
-	ID             uuid.UUID  `json:"id" db:"id"`
-	QuizAttemptID  uuid.UUID  `json:"quiz_attempt_id" db:"quiz_attempt_id"`
+	ID            uuid.UUID `json:"id" db:"id"`
+	QuizAttemptID uuid.UUID `json:"quiz_attempt_id" db:"quiz_attempt_id"`
 
 	EasyCorrect   int `json:"easy_correct" db:"easy_correct"`
 	EasyTotal     int `json:"easy_total" db:"easy_total"`
@@ -24,13 +24,13 @@ type QuizResults struct {
 	CodingCorrect         int `json:"coding_correct" db:"coding_correct"`
 	CodingTotal           int `json:"coding_total" db:"coding_total"`
 
-	AvgTimePerQuestionSeconds   *float64 `json:"avg_time_per_question_seconds,omitempty" db:"avg_time_per_question_seconds"`
-	FastestQuestionTimeSeconds  *int     `json:"fastest_question_time_seconds,omitempty" db:"fastest_question_time_seconds"`
-	SlowestQuestionTimeSeconds  *int     `json:"slowest_question_time_seconds,omitempty" db:"slowest_question_time_seconds"`
+	AvgTimePerQuestionSeconds  *float64 `json:"avg_time_per_question_seconds,omitempty" db:"avg_time_per_question_seconds"`
+	FastestQuestionTimeSeconds *int     `json:"fastest_question_time_seconds,omitempty" db:"fastest_question_time_seconds"`
+	SlowestQuestionTimeSeconds *int     `json:"slowest_question_time_seconds,omitempty" db:"slowest_question_time_seconds"`
 
-	AIFeedback *string   `json:"ai_feedback,omitempty" db:"ai_feedback"`
-	Strengths  []string  `json:"strengths,omitempty" db:"strengths"`
-	Weaknesses []string  `json:"weaknesses,omitempty" db:"weaknesses"`
+	AIFeedback *string  `json:"ai_feedback,omitempty" db:"ai_feedback"`
+	Strengths  []string `json:"strengths,omitempty" db:"strengths"`
+	Weaknesses []string `json:"weaknesses,omitempty" db:"weaknesses"`
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }

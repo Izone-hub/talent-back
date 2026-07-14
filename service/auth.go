@@ -26,8 +26,8 @@ type Claims struct {
 	UserID         uuid.UUID `json:"user_id"`
 	GithubID       int64     `json:"github_id"`
 	GithubUsername string    `json:"github_username"`
-	ApplicationID uuid.UUID `json:"application_id"` // Add this
-    JobID         uuid.UUID `json:"job_id"`         // Add this
+	ApplicationID  uuid.UUID `json:"application_id"` // Add this
+	JobID          uuid.UUID `json:"job_id"`         // Add this
 	Role           string    `json:"role"`
 	jwt.RegisteredClaims
 }
@@ -105,17 +105,17 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 		}
 
 		adminPermissions, err := json.Marshal(map[string]bool{
-			"manage_jobs":           true,
-			"manage_questions":      true,
-			"manage_tags":           true,
-			"manage_weights":        true,
-			"manage_difficulties":   true,
-			"view_applicants":       true,
-			"view_cvs":              true,
-			"view_github_metadata":  true,
-			"view_ai_summaries":     true,
+			"manage_jobs":              true,
+			"manage_questions":         true,
+			"manage_tags":              true,
+			"manage_weights":           true,
+			"manage_difficulties":      true,
+			"view_applicants":          true,
+			"view_cvs":                 true,
+			"view_github_metadata":     true,
+			"view_ai_summaries":        true,
 			"view_applicant_summaries": true,
-			"view_audit_logs":       true,
+			"view_audit_logs":          true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal admin permissions: %w", err)
@@ -157,7 +157,6 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 // upsertUserFromGitHub creates or updates a user from GitHub OAuth data.
 func (s *AuthService) upsertUserFromGitHub(ctx context.Context, githubUser *GitHubUser, tokenResponse *GitHubTokenResponse, topLanguages []string) (database.User, error) {
 	expiresAt := time.Now().AddDate(1, 0, 0)
-
 
 	return s.queries.CreateOrUpdateUser(ctx, database.CreateOrUpdateUserParams{
 		GithubID:             githubUser.ID,

@@ -210,10 +210,10 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	}
 
 	qMap := map[string]interface{}{
-		"id":                id.String(),
-		"question_text":     qText,
-		"question_type":     qType,
-		"difficulty":        difficulty,
+		"id":                 id.String(),
+		"question_text":      qText,
+		"question_type":      qType,
+		"difficulty":         difficulty,
 		"time_limit_seconds": timeLimitSeconds,
 	}
 

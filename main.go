@@ -70,7 +70,6 @@ func main() {
 		log.Println("Successfully synced question_tags junction table mappings")
 	}
 
-
 	// Initialize services
 	githubService := service.NewGithubService(&cfg)
 	authService := service.NewAuthService(&cfg, githubService, db)
@@ -118,7 +117,7 @@ func main() {
 	// Wrap handler with logging and CORS middleware
 	handler = middleware.RequestLogger(handler)
 	corsHandler := middleware.CORSMiddleware(handler)
-   
+
 	// Start server
 	serverAddr := ":5000"
 	log.Printf("Server starting on %s", serverAddr)

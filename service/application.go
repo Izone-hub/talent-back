@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Izone-hub/talent-backend/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/Izone-hub/talent-backend/database"
 )
 
 type ApplicationService struct {

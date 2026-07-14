@@ -9,10 +9,10 @@ const (
 )
 
 type ExecuteRequest struct {
-	Language string `json:"language"`
-	Code     string `json:"code"`
+	Language string        `json:"language"`
+	Code     string        `json:"code"`
 	Type     ExecutionType `json:"type"`
-	Stdin    string `json:"stdin,omitempty"`
+	Stdin    string        `json:"stdin,omitempty"`
 
 	TemplateID string            `json:"template_id,omitempty"`
 	Files      map[string]string `json:"files,omitempty"`

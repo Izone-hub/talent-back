@@ -121,37 +121,38 @@ func (c *QuizController) GetNextQuestion(w http.ResponseWriter, r *http.Request)
 // 5. SaveAnswer handler
 // 5. SaveAnswer handler
 func (c *QuizController) SaveAnswer(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 
-    claims, ok := r.Context().Value("user").(*service.Claims)
-    if !ok {
-        writeError(w, http.StatusUnauthorized, "Unauthorized")
-        return
-    }
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
 
-    id := r.PathValue("id")
+	id := r.PathValue("id")
 
-    var req struct {
-        QuestionID       string `json:"question_id"`
-        UserAnswer       string `json:"user_answer"`
-        TimeSpentSeconds int    `json:"time_spent_seconds"`
-        IsSkipped        bool   `json:"is_skipped"`
-    }
+	var req struct {
+		QuestionID       string `json:"question_id"`
+		UserAnswer       string `json:"user_answer"`
+		TimeSpentSeconds int    `json:"time_spent_seconds"`
+		IsSkipped        bool   `json:"is_skipped"`
+	}
 
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        writeError(w, http.StatusBadRequest, "Invalid request payload: "+err.Error())
-        return
-    }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request payload: "+err.Error())
+		return
+	}
 
-    // Call the Service layer (which handles the DB check)
-    err := c.quizService.SaveQuizAnswer(r.Context(), id, claims.UserID.String(), req.QuestionID, req.UserAnswer, req.TimeSpentSeconds, req.IsSkipped)
-    if err != nil {
-        writeError(w, http.StatusInternalServerError, "Failed to save answer: "+err.Error())
-        return
-    }
+	// Call the Service layer (which handles the DB check)
+	err := c.quizService.SaveQuizAnswer(r.Context(), id, claims.UserID.String(), req.QuestionID, req.UserAnswer, req.TimeSpentSeconds, req.IsSkipped)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save answer: "+err.Error())
+		return
+	}
 
-    writeJSON(w, http.StatusOK, map[string]string{"message": "Answer saved successfully"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Answer saved successfully"})
 }
+
 // 6. RunCode handler (for coding_challenge questions)
 func (c *QuizController) RunCode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
