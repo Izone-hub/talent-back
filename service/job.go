@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/models"
@@ -122,17 +120,17 @@ func (s *JobService) GetPublishedJob(ctx context.Context, jobID uuid.UUID) (*mod
 // ListPublishedJobs returns a paginated list of published jobs for the public
 // job board. If userID is provided, it includes the user's application status for each job.
 func (s *JobService) ListPublishedJobs(ctx context.Context, userID *uuid.UUID, limit, offset int) ([]models.Job, error) {
-	var dbJobs []database.ListPublishedJobsRow
+	var dbJobs []database.ListAllPublishedJobsRow
 	var err error
 
 	if userID != nil {
-		dbJobs, err = s.queries.ListPublishedJobs(ctx, database.ListPublishedJobsParams{
+		dbJobs, err = s.queries.ListAllPublishedJobs(ctx, database.ListAllPublishedJobsParams{
 			Limit:  int32(limit),
 			Offset: int32(offset),
 			UserID: uuidToPgUUID(*userID),
 		})
 	} else {
-		dbJobs, err = s.queries.ListPublishedJobs(ctx, database.ListPublishedJobsParams{
+		dbJobs, err = s.queries.ListAllPublishedJobs(ctx, database.ListAllPublishedJobsParams{
 			Limit:  int32(limit),
 			Offset: int32(offset),
 			UserID: pgtype.UUID{Valid: false},
@@ -416,7 +414,7 @@ func pgNullCategoryToStrPtr(c database.NullTagCategory) *string {
 	return &s
 }
 
-func listPublishedJobsRowsToModels(dbJobs []database.ListPublishedJobsRow) []models.Job {
+func listPublishedJobsRowsToModels(dbJobs []database.ListAllPublishedJobsRow) []models.Job {
 	jobs := make([]models.Job, 0, len(dbJobs))
 	for _, j := range dbJobs {
 		var id uuid.UUID
@@ -458,21 +456,13 @@ func listPublishedJobsRowsToModels(dbJobs []database.ListPublishedJobsRow) []mod
 			UpdatedAt:         pgTimestampToTime(j.UpdatedAt),
 		}
 
-		// Parse UserApplication JSON if present
-		if len(j.UserApplication) > 0 {
-			var app struct {
-				Applied       bool       `json:"applied"`
-				ApplicationID *uuid.UUID `json:"application_id"`
-				Status        *string    `json:"status"`
-				SubmittedAt   *time.Time `json:"submitted_at"`
+		if j.ApplicationStatus == "applied" {
+			job.UserApplication = &models.JobUserApplication{
+				Applied: true,
 			}
-			if err := json.Unmarshal(j.UserApplication, &app); err == nil {
-				job.UserApplication = &models.JobUserApplication{
-					Applied:       app.Applied,
-					ApplicationID: app.ApplicationID,
-					Status:        app.Status,
-					SubmittedAt:   app.SubmittedAt,
-				}
+		} else if j.ApplicationStatus == "not_applied" {
+			job.UserApplication = &models.JobUserApplication{
+				Applied: false,
 			}
 		}
 

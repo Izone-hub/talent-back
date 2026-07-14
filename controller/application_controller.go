@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/service"
+	"github.com/google/uuid"
 )
 
 type ApplicationController struct {
