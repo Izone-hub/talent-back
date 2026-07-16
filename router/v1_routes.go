@@ -17,6 +17,7 @@ func V1Routes(
 	appController *controller.ApplicationController,
 	sandboxController *controller.SandboxController,
 	intelligenceController *controller.IntelligenceController,
+	savedJobController *controller.SavedJobController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -41,6 +42,14 @@ func V1Routes(
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/close", authMiddleware.Authenticate(jobController.CloseJob))
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/archive", authMiddleware.Authenticate(jobController.ArchiveJob))
 	mux.HandleFunc("POST /api/v1/jobs/{id}/apply", authMiddleware.Authenticate(appController.ApplyForJob))
+
+	// -----------------------------------------------------------------------
+	// Saved Jobs routes — Protected
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /api/v1/jobs/saved", authMiddleware.Authenticate(savedJobController.ListSavedJobs))
+	mux.HandleFunc("POST /api/v1/jobs/{id}/save", authMiddleware.Authenticate(savedJobController.SaveJob))
+	mux.HandleFunc("DELETE /api/v1/jobs/{id}/save", authMiddleware.Authenticate(savedJobController.UnsaveJob))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/saved", authMiddleware.Authenticate(savedJobController.IsJobSaved))
 
 	// -----------------------------------------------------------------------
 	// Application routes
