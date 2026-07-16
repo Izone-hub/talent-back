@@ -42,7 +42,7 @@ func (c *ApplicationController) ApplyForJob(w http.ResponseWriter, r *http.Reque
 	}
 
 	if cv, err := c.cvService.GetCurrentCV(r.Context(), claims.UserID); err == nil {
-		go triggerCVAnalysis(cv.FilePath, cv.FileName, claims.GithubUsername)
+		go triggerCVAnalysis(cv.FilePath, cv.FileName, claims.GithubUsername, cv.Version)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

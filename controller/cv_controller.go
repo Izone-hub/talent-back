@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/models"
@@ -104,7 +105,7 @@ func (c *CvController) UploadCV(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, cv.ToResponse())
 }
 
-func triggerCVAnalysis(filePath, fileName, githubUsername string) {
+func triggerCVAnalysis(filePath, fileName, githubUsername string, cvVersion int) {
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil {
 		return
@@ -122,6 +123,9 @@ func triggerCVAnalysis(filePath, fileName, githubUsername string) {
 	}
 	if githubUsername != "" {
 		mp.WriteField("github_username", githubUsername)
+	}
+	if cvVersion > 0 {
+		mp.WriteField("cv_version", strconv.Itoa(cvVersion))
 	}
 	mp.Close()
 
