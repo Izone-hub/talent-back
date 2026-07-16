@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -176,7 +177,38 @@ func (c *IntelligenceController) AnalyzeCV(w http.ResponseWriter, r *http.Reques
 	defer file.Close()
 
 	githubUsername := r.FormValue("github_username")
+	cvVersionStr := r.FormValue("cv_version")
+	cvVersion, _ := strconv.Atoi(cvVersionStr)
 
+	var targetUserID uuid.UUID
+	if githubUsername != "" {
+		if u, err := c.queries.GetUserByGitHubUsername(r.Context(), githubUsername); err == nil {
+			targetUserID = uuid.UUID(u.ID.Bytes)
+		}
+	}
+
+	if targetUserID != uuid.Nil && cvVersion > 0 {
+		var pgUserID pgtype.UUID
+		copy(pgUserID.Bytes[:], targetUserID[:])
+		pgUserID.Valid = true
+
+		var pgVersion pgtype.Int4
+		pgVersion.Int32 = int32(cvVersion)
+		pgVersion.Valid = true
+
+		existingSummary, err := c.queries.GetAISummaryByCVVersion(r.Context(), database.GetAISummaryByCVVersionParams{
+			UserID:    pgUserID.Bytes,
+			CvVersion: pgVersion,
+		})
+
+		if err == nil {
+			// Found it! Return the existing summary and skip calling the talent-analyzer
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write(existingSummary.Summary)
+			return
+		}
+	}
 	var buf bytes.Buffer
 	mp := multipart.NewWriter(&buf)
 
@@ -250,6 +282,7 @@ func (c *IntelligenceController) AnalyzeCV(w http.ResponseWriter, r *http.Reques
 				Strengths:  pgtype.Text{String: strengths, Valid: strengths != ""},
 				Weaknesses: pgtype.Text{String: weaknesses, Valid: weaknesses != ""},
 				Model:      pgtype.Text{String: analysisResp.Engine, Valid: analysisResp.Engine != ""},
+				CvVersion:  pgtype.Int4{Int32: int32(cvVersion), Valid: cvVersion > 0},
 			})
 		}
 	}

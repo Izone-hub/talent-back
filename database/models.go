@@ -480,6 +480,7 @@ type AiSummary struct {
 	Weaknesses pgtype.Text
 	Model      pgtype.Text
 	CreatedAt  pgtype.Timestamp
+	CvVersion  pgtype.Int4
 }
 
 type AuditExport struct {

@@ -13,15 +13,10 @@ import (
 )
 
 const createAISummary = `-- name: CreateAISummary :one
-INSERT INTO ai_summaries (
-    user_id,
-    summary,
-    strengths,
-    weaknesses,
-    model
-)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, summary, strengths, weaknesses, model, created_at
+INSERT INTO ai_summaries (user_id, summary, strengths, weaknesses, model, cv_version)
+VALUES ($1, $2, $3, $4, $5, $6)
+
+RETURNING id, user_id, summary, strengths, weaknesses, model, created_at, cv_version
 `
 
 type CreateAISummaryParams struct {
@@ -30,6 +25,7 @@ type CreateAISummaryParams struct {
 	Strengths  pgtype.Text
 	Weaknesses pgtype.Text
 	Model      pgtype.Text
+	CvVersion  pgtype.Int4
 }
 
 func (q *Queries) CreateAISummary(ctx context.Context, arg CreateAISummaryParams) (AiSummary, error) {
@@ -39,6 +35,7 @@ func (q *Queries) CreateAISummary(ctx context.Context, arg CreateAISummaryParams
 		arg.Strengths,
 		arg.Weaknesses,
 		arg.Model,
+		arg.CvVersion,
 	)
 	var i AiSummary
 	err := row.Scan(
@@ -49,12 +46,39 @@ func (q *Queries) CreateAISummary(ctx context.Context, arg CreateAISummaryParams
 		&i.Weaknesses,
 		&i.Model,
 		&i.CreatedAt,
+		&i.CvVersion,
+	)
+	return i, err
+}
+
+const getAISummaryByCVVersion = `-- name: GetAISummaryByCVVersion :one
+SELECT id, user_id, summary, strengths, weaknesses, model, created_at, cv_version FROM ai_summaries
+WHERE user_id = $1 AND cv_version = $2
+`
+
+type GetAISummaryByCVVersionParams struct {
+	UserID    uuid.UUID
+	CvVersion pgtype.Int4
+}
+
+func (q *Queries) GetAISummaryByCVVersion(ctx context.Context, arg GetAISummaryByCVVersionParams) (AiSummary, error) {
+	row := q.db.QueryRow(ctx, getAISummaryByCVVersion, arg.UserID, arg.CvVersion)
+	var i AiSummary
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Summary,
+		&i.Strengths,
+		&i.Weaknesses,
+		&i.Model,
+		&i.CreatedAt,
+		&i.CvVersion,
 	)
 	return i, err
 }
 
 const getLatestAISummary = `-- name: GetLatestAISummary :one
-SELECT id, user_id, summary, strengths, weaknesses, model, created_at FROM ai_summaries
+SELECT id, user_id, summary, strengths, weaknesses, model, created_at, cv_version FROM ai_summaries
 WHERE user_id = $1
 ORDER BY created_at DESC
 LIMIT 1
@@ -71,6 +95,7 @@ func (q *Queries) GetLatestAISummary(ctx context.Context, userID uuid.UUID) (AiS
 		&i.Weaknesses,
 		&i.Model,
 		&i.CreatedAt,
+		&i.CvVersion,
 	)
 	return i, err
 }
