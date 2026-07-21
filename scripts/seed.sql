@@ -2,7 +2,7 @@
 -- Auto-loaded by docker-compose on first startup
 
 -- Create a sample user (GitHub-style)
-INSERT INTO users (id, github_id, username, avatar_url, email, role)
+INSERT INTO users (id, github_id, github_username, avatar_url, email, role)
 VALUES
   ('11111111-1111-1111-1111-111111111111', 12345, 'testuser', 'https://avatars.githubusercontent.com/u/12345?v=4', 'testuser@example.com', 'user'),
   ('22222222-2222-2222-2222-222222222222', 67890, 'adminuser', 'https://avatars.githubusercontent.com/u/67890?v=4', 'admin@example.com', 'admin')
@@ -20,11 +20,11 @@ VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- Create sample jobs
-INSERT INTO jobs (id, title, company, description, location, type, status, created_by)
+INSERT INTO jobs (id, title, company, description, requirements, location, job_type, status, posted_by)
 VALUES
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01', 'Backend Go Developer', 'TechCorp', 'Build scalable APIs in Go', 'Remote', 'full_time', 'published', '22222222-2222-2222-2222-222222222222'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb02', 'Full Stack Engineer', 'StartupInc', 'Work on web apps with JS and Python', 'Remote', 'full_time', 'published', '22222222-2222-2222-2222-222222222222'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb03', 'DevOps Engineer', 'CloudBase', 'Container orchestration and infra', 'On-site', 'full_time', 'published', '22222222-2222-2222-2222-222222222222')
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01', 'Backend Go Developer', 'TechCorp', 'Build scalable APIs in Go', 'Go experience required', 'Remote', 'full-time', 'published', '22222222-2222-2222-2222-222222222222'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb02', 'Full Stack Engineer', 'StartupInc', 'Work on web apps with JS and Python', 'JS and Python experience required', 'Remote', 'full-time', 'published', '22222222-2222-2222-2222-222222222222'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb03', 'DevOps Engineer', 'CloudBase', 'Container orchestration and infra', 'Docker and K8s experience required', 'On-site', 'full-time', 'published', '22222222-2222-2222-2222-222222222222')
 ON CONFLICT (id) DO NOTHING;
 
 -- Link jobs to tags
@@ -188,7 +188,7 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- Create a sample application for the test user
-INSERT INTO job_applications (id, user_id, job_id, status)
+INSERT INTO job_applications (id, user_id, job_id, github_username, github_id, status)
 VALUES
-  ('dddddddd-dddd-dddd-dddd-dddddddddd01', '11111111-1111-1111-1111-111111111111', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01', 'submitted')
+  ('dddddddd-dddd-dddd-dddd-dddddddddd01', '11111111-1111-1111-1111-111111111111', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01', 'testuser', 12345, 'submitted')
 ON CONFLICT (id) DO NOTHING;

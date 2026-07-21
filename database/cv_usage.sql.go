@@ -196,7 +196,7 @@ func (q *Queries) GetCVUsageHistory(ctx context.Context, cvID pgtype.UUID) ([]Ge
 }
 
 const getCVsForApplication = `-- name: GetCVsForApplication :many
-SELECT c.id, c.user_id, c.file_name, c.file_path, c.file_size, c.file_hash, c.version, c.is_current, c.uploaded_at, c.uploaded_from_ip, c.application_id, c.created_at
+SELECT c.id, c.user_id, c.file_name, c.file_path, c.file_size, c.file_hash, c.version, c.is_current, c.uploaded_at, c.uploaded_from_ip, c.application_id, c.created_at, c.updated_at
 FROM cv_application_usage cu
 JOIN cv_versions c ON cu.cv_id = c.id
 WHERE cu.application_id = $1
@@ -225,6 +225,7 @@ func (q *Queries) GetCVsForApplication(ctx context.Context, applicationID pgtype
 			&i.UploadedFromIp,
 			&i.ApplicationID,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -237,7 +238,7 @@ func (q *Queries) GetCVsForApplication(ctx context.Context, applicationID pgtype
 }
 
 const getLatestCVForApplication = `-- name: GetLatestCVForApplication :one
-SELECT c.id, c.user_id, c.file_name, c.file_path, c.file_size, c.file_hash, c.version, c.is_current, c.uploaded_at, c.uploaded_from_ip, c.application_id, c.created_at
+SELECT c.id, c.user_id, c.file_name, c.file_path, c.file_size, c.file_hash, c.version, c.is_current, c.uploaded_at, c.uploaded_from_ip, c.application_id, c.created_at, c.updated_at
 FROM cv_application_usage cu
 JOIN cv_versions c ON cu.cv_id = c.id
 WHERE cu.application_id = $1
@@ -261,6 +262,7 @@ func (q *Queries) GetLatestCVForApplication(ctx context.Context, applicationID p
 		&i.UploadedFromIp,
 		&i.ApplicationID,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
