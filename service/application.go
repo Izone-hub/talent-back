@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
+	"github.com/Izone-hub/talent-backend/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -229,4 +231,148 @@ func (s *ApplicationService) AddEmployerFeedback(ctx context.Context, appID uuid
 
 func (s *ApplicationService) GetRecentApplications(ctx context.Context, limit int32) ([]database.JobApplication, error) {
 	return s.queries.GetRecentApplications(ctx, limit)
+}
+
+type ApplicationInformation struct {
+	Application models.JobApplication `json:"application"`
+	AISummary   models.AiSummary      `json:"ai_summary,omitempty"`
+	QuizAttempt models.QuizAttempt    `json:"quiz_attempt,omitempty"`
+}
+
+func dbAppToModel(app database.JobApplication) models.JobApplication {
+	model := models.JobApplication{}
+	copy(model.ID[:], app.ID.Bytes[:])
+	copy(model.JobID[:], app.JobID.Bytes[:])
+	copy(model.UserID[:], app.UserID.Bytes[:])
+
+	model.GithubUsername = app.GithubUsername
+	model.GithubID = app.GithubID
+	model.ApplicantEmail = pgTextToStrPtr(app.ApplicantEmail)
+	model.ApplicantName = pgTextToStrPtr(app.ApplicantName)
+	model.ApplicantAvatarURL = pgTextToStrPtr(app.ApplicantAvatarUrl)
+	model.CoverLetter = pgTextToStrPtr(app.CoverLetter)
+	if app.ProposedSalary.Valid {
+		v := int(app.ProposedSalary.Int32)
+		model.ProposedSalary = &v
+	}
+	model.ProposedSalaryCurrency = pgTextToString(app.ProposedSalaryCurrency)
+	model.AvailabilityDate = pgTimestampToTimePtr(app.AvailabilityDate)
+	model.PortfolioURL = pgTextToStrPtr(app.PortfolioUrl)
+	model.LinkedinURL = pgTextToStrPtr(app.LinkedinUrl)
+	model.Notes = pgTextToStrPtr(app.Notes)
+	model.Status = models.ApplicationStatus(app.Status)
+	model.SubmittedAt = pgTimestampToTimePtr(app.SubmittedAt)
+	model.ReviewedAt = pgTimestampToTimePtr(app.ReviewedAt)
+
+	if app.ReviewedBy != uuid.Nil {
+		v := app.ReviewedBy
+		model.ReviewedBy = &v
+	}
+
+	model.EmployerFeedback = pgTextToStrPtr(app.EmployerFeedback)
+	model.RejectionReason = pgTextToStrPtr(app.RejectionReason)
+
+	if app.QuizID != uuid.Nil {
+		v := app.QuizID
+		model.QuizID = &v
+	}
+	if app.QuizScore.Valid {
+		v := int(app.QuizScore.Int32)
+		model.QuizScore = &v
+	}
+	model.QuizCompletedAt = pgTimestampToTimePtr(app.QuizCompletedAt)
+	if app.QuizPassed.Valid {
+		model.QuizPassed = &app.QuizPassed.Bool
+	}
+	model.CanViewAISummary = app.CanViewAiSummary.Bool && app.CanViewAiSummary.Valid
+	model.CreatedAt = pgTimestampToTime(app.CreatedAt)
+	model.UpdatedAt = pgTimestampToTime(app.UpdatedAt)
+
+	return model
+}
+
+func dbAiSummaryToModel(s database.AiSummary) models.AiSummary {
+	model := models.AiSummary{}
+	copy(model.ID[:], s.ID.Bytes[:])
+	copy(model.UserID[:], s.UserID[:])
+
+	if len(s.Summary) > 0 {
+		model.Summary = json.RawMessage(s.Summary)
+	}
+	model.Strengths = pgTextToStrPtr(s.Strengths)
+	model.Weaknesses = pgTextToStrPtr(s.Weaknesses)
+	model.Model = pgTextToStrPtr(s.Model)
+	model.CreatedAt = pgTimestampToTimePtr(s.CreatedAt)
+	if s.CvVersion.Valid {
+		v := int(s.CvVersion.Int32)
+		model.CvVersion = &v
+	}
+	return model
+}
+
+func dbQuizAttemptToModel(q database.QuizAttempt) models.QuizAttempt {
+	model := models.QuizAttempt{}
+	copy(model.ID[:], q.ID.Bytes[:])
+	copy(model.ApplicationID[:], q.ApplicationID.Bytes[:])
+	copy(model.UserID[:], q.UserID.Bytes[:])
+	copy(model.JobID[:], q.JobID.Bytes[:])
+
+	model.TotalQuestions = int(q.TotalQuestions)
+	model.QuestionsPerQuiz = int(q.QuestionsPerQuiz)
+	if q.TimeLimitMinutes.Valid {
+		v := int(q.TimeLimitMinutes.Int32)
+		model.TimeLimitMinutes = &v
+	}
+	model.PassingScore = int(q.PassingScore)
+	model.Status = models.QuizAttemptStatus(q.Status)
+	model.StartedAt = pgTimestampToTime(q.StartedAt)
+	model.CompletedAt = pgTimestampToTimePtr(q.CompletedAt)
+	model.LastActivityAt = pgTimestampToTime(q.LastActivityAt)
+	if q.Score.Valid {
+		v := int(q.Score.Int32)
+		model.Score = &v
+	}
+	model.CorrectAnswers = int(q.CorrectAnswers.Int32)
+	model.IncorrectAnswers = int(q.IncorrectAnswers.Int32)
+	model.SkippedQuestions = int(q.SkippedQuestions.Int32)
+	if q.Passed.Valid {
+		model.Passed = &q.Passed.Bool
+	}
+	model.TimeSpentSeconds = int(q.TimeSpentSeconds.Int32)
+	model.AutoSaveIntervalSeconds = int(q.AutoSaveIntervalSeconds.Int32)
+	model.CreatedAt = pgTimestampToTime(q.CreatedAt)
+	model.UpdatedAt = pgTimestampToTime(q.UpdatedAt)
+	return model
+}
+
+func (s *ApplicationService) GetApplicationInformation(ctx context.Context, appID uuid.UUID) (ApplicationInformation, error) {
+	var pgAppID pgtype.UUID
+	copy(pgAppID.Bytes[:], appID[:])
+	pgAppID.Valid = true
+
+	app, err := s.queries.GetApplicationByID(ctx, pgAppID)
+	if err != nil {
+		return ApplicationInformation{}, fmt.Errorf("application not found: %w", err)
+	}
+
+	userID, err := uuid.FromBytes(app.UserID.Bytes[:])
+	if err != nil {
+		return ApplicationInformation{}, fmt.Errorf("invalid user ID in application: %w", err)
+	}
+
+	aiSummary, err := s.queries.GetLatestAISummary(ctx, userID)
+	if err != nil {
+		aiSummary = database.AiSummary{}
+	}
+
+	quizAttempt, err := s.queries.GetQuizAttemptByApplication(ctx, pgAppID)
+	if err != nil {
+		quizAttempt = database.QuizAttempt{}
+	}
+
+	return ApplicationInformation{
+		Application: dbAppToModel(app),
+		AISummary:   dbAiSummaryToModel(aiSummary),
+		QuizAttempt: dbQuizAttemptToModel(quizAttempt),
+	}, nil
 }

@@ -143,6 +143,12 @@ func V1Routes(
 	mux.HandleFunc("POST /api/v1/analyze-cv", intelligenceController.AnalyzeCV)
 
 	// -----------------------------------------------------------------------
+	// User review dashboard routes
+	// -----------------------------------------------------------------------
+
+	mux.HandleFunc("GET /api/v1/application-information/{id}", authMiddleware.Authenticate(appController.GetApplicationInformation))
+
+	// -----------------------------------------------------------------------
 	// Admin routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/admin/dashboard",
