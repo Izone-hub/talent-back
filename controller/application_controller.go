@@ -103,6 +103,23 @@ func (c *ApplicationController) GetApplicationDetail(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusOK, app)
 }
 
+func (c *ApplicationController) GetApplicationInformation(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	appID, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid application ID")
+		return
+	}
+
+	info, err := c.appService.GetApplicationInformation(r.Context(), appID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, info)
+}
+
 func (c *ApplicationController) StartReview(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	appID, err := uuid.Parse(idStr)
