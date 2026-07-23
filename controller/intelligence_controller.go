@@ -19,8 +19,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const analyzeCVURL = "http://localhost:8000/analyze-cv"
-
 type IntelligenceController struct {
 	githubService *service.GithubService
 	queries       *database.Queries
@@ -228,8 +226,13 @@ func (c *IntelligenceController) AnalyzeCV(w http.ResponseWriter, r *http.Reques
 	}
 	mp.Close()
 
+	analyzerURL := os.Getenv("ANALYZER_URL")
+	if analyzerURL == "" {
+		analyzerURL = "http://localhost:8000/analyze-cv"
+	}
+
 	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Post(analyzeCVURL, mp.FormDataContentType(), &buf)
+	resp, err := client.Post(analyzerURL, mp.FormDataContentType(), &buf)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach analysis service: %v", err))
 		return

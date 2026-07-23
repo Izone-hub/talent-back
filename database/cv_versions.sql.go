@@ -35,7 +35,7 @@ INSERT INTO cv_versions (
     $1, $2, $3, $4, $5, 
     COALESCE((SELECT MAX(version) + 1 FROM cv_versions WHERE user_id = $1), 1),
     true, $6, NULLIF($7, '00000000-0000-0000-0000-000000000000'::uuid)
-) RETURNING id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at
+) RETURNING id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at
 `
 
 type CreateCVParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) CreateCV(ctx context.Context, arg CreateCVParams) (CvVersion, 
 		&i.UploadedFromIp,
 		&i.ApplicationID,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -109,7 +110,7 @@ func (q *Queries) DeleteOldCVs(ctx context.Context, userID pgtype.UUID) error {
 }
 
 const findDuplicateCV = `-- name: FindDuplicateCV :one
-SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at FROM cv_versions
+SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at FROM cv_versions
 WHERE user_id = $1 AND file_hash = $2
 LIMIT 1
 `
@@ -135,12 +136,13 @@ func (q *Queries) FindDuplicateCV(ctx context.Context, arg FindDuplicateCVParams
 		&i.UploadedFromIp,
 		&i.ApplicationID,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getCVByHash = `-- name: GetCVByHash :one
-SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at FROM cv_versions 
+SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at FROM cv_versions 
 WHERE user_id = $1 AND file_hash = $2 
 ORDER BY version DESC LIMIT 1
 `
@@ -166,12 +168,13 @@ func (q *Queries) GetCVByHash(ctx context.Context, arg GetCVByHashParams) (CvVer
 		&i.UploadedFromIp,
 		&i.ApplicationID,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getCVByID = `-- name: GetCVByID :one
-SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at FROM cv_versions WHERE id = $1
+SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at FROM cv_versions WHERE id = $1
 `
 
 func (q *Queries) GetCVByID(ctx context.Context, id pgtype.UUID) (CvVersion, error) {
@@ -190,6 +193,7 @@ func (q *Queries) GetCVByID(ctx context.Context, id pgtype.UUID) (CvVersion, err
 		&i.UploadedFromIp,
 		&i.ApplicationID,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -274,7 +278,7 @@ func (q *Queries) GetCVVersions(ctx context.Context, userID pgtype.UUID) ([]GetC
 
 const getCVsByApplication = `-- name: GetCVsByApplication :many
 SELECT 
-    c.id, c.user_id, c.file_name, c.file_path, c.file_size, c.file_hash, c.version, c.is_current, c.uploaded_at, c.uploaded_from_ip, c.application_id, c.created_at,
+    c.id, c.user_id, c.file_name, c.file_path, c.file_size, c.file_hash, c.version, c.is_current, c.uploaded_at, c.uploaded_from_ip, c.application_id, c.created_at, c.updated_at,
     cu.used_at
 FROM cv_versions c
 JOIN cv_application_usage cu ON c.id = cu.cv_id
@@ -295,6 +299,7 @@ type GetCVsByApplicationRow struct {
 	UploadedFromIp *netip.Addr
 	ApplicationID  uuid.UUID
 	CreatedAt      pgtype.Timestamp
+	UpdatedAt      pgtype.Timestamp
 	UsedAt         pgtype.Timestamp
 }
 
@@ -320,6 +325,7 @@ func (q *Queries) GetCVsByApplication(ctx context.Context, applicationID pgtype.
 			&i.UploadedFromIp,
 			&i.ApplicationID,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 			&i.UsedAt,
 		); err != nil {
 			return nil, err
@@ -333,7 +339,7 @@ func (q *Queries) GetCVsByApplication(ctx context.Context, applicationID pgtype.
 }
 
 const getCurrentCV = `-- name: GetCurrentCV :one
-SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at FROM cv_versions
+SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at FROM cv_versions
 WHERE user_id = $1 AND is_current = true
 LIMIT 1
 `
@@ -354,12 +360,13 @@ func (q *Queries) GetCurrentCV(ctx context.Context, userID pgtype.UUID) (CvVersi
 		&i.UploadedFromIp,
 		&i.ApplicationID,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const listCVsByUser = `-- name: ListCVsByUser :many
-SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at FROM cv_versions
+SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at FROM cv_versions
 WHERE user_id = $1
 ORDER BY 
     is_current DESC,
@@ -396,6 +403,7 @@ func (q *Queries) ListCVsByUser(ctx context.Context, arg ListCVsByUserParams) ([
 			&i.UploadedFromIp,
 			&i.ApplicationID,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -427,7 +435,7 @@ SET
     file_hash = $5,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at
+RETURNING id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at
 `
 
 type UpdateCVParams struct {
@@ -460,6 +468,7 @@ func (q *Queries) UpdateCV(ctx context.Context, arg UpdateCVParams) (CvVersion, 
 		&i.UploadedFromIp,
 		&i.ApplicationID,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

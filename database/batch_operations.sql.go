@@ -142,7 +142,7 @@ WHERE id NOT IN (
     SELECT DISTINCT cv_id FROM cv_application_usage
 )
 AND created_at < NOW() - interval '30 days'
-RETURNING id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at
+RETURNING id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at
 `
 
 func (q *Queries) CleanupUnusedCVs(ctx context.Context) ([]CvVersion, error) {
@@ -167,6 +167,7 @@ func (q *Queries) CleanupUnusedCVs(ctx context.Context) ([]CvVersion, error) {
 			&i.UploadedFromIp,
 			&i.ApplicationID,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -239,7 +240,7 @@ func (q *Queries) GetApplicationsByDateRange(ctx context.Context, arg GetApplica
 }
 
 const getCVsByDateRange = `-- name: GetCVsByDateRange :many
-SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at FROM cv_versions
+SELECT id, user_id, file_name, file_path, file_size, file_hash, version, is_current, uploaded_at, uploaded_from_ip, application_id, created_at, updated_at FROM cv_versions
 WHERE created_at BETWEEN $1 AND $2
 ORDER BY created_at
 `
@@ -271,6 +272,7 @@ func (q *Queries) GetCVsByDateRange(ctx context.Context, arg GetCVsByDateRangePa
 			&i.UploadedFromIp,
 			&i.ApplicationID,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

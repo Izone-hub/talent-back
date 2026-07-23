@@ -558,6 +558,7 @@ type CvVersion struct {
 	UploadedFromIp *netip.Addr
 	ApplicationID  uuid.UUID
 	CreatedAt      pgtype.Timestamp
+	UpdatedAt      pgtype.Timestamp
 }
 
 type GithubSnapshot struct {
@@ -807,12 +808,18 @@ type User struct {
 	LastLoginAt          pgtype.Timestamp
 	CreatedAt            pgtype.Timestamp
 	UpdatedAt            pgtype.Timestamp
+	PublicRepos          pgtype.Int4
+	PublicGists          pgtype.Int4
+	Followers            pgtype.Int4
+	Following            pgtype.Int4
 	Hireable             pgtype.Bool
 	Blog                 pgtype.Text
 	Company              pgtype.Text
 	Location             pgtype.Text
 	Bio                  pgtype.Text
 	TwitterUsername      pgtype.Text
+	TopLanguages         []string
+	ContributionCount    pgtype.Int4
 }
 
 type UserSkillProfile struct {
