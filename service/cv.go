@@ -151,7 +151,22 @@ func (s *CvService) UploadCV(ctx context.Context, userID uuid.UUID, fileName str
 		FileHash: fileHash,
 	})
 	if err == nil {
-		// Duplicate found — return existing CV instead of re-uploading
+		// Duplicate found — re-mark it as the current CV and return it.
+		// The existing record may have is_current=false if a newer CV was
+		// uploaded after it, so we need to reset the flag.
+		pgUserID := uuidToPgUUID(userID)
+		if err := s.queries.SetCurrentCV(ctx, pgUserID); err != nil {
+			log.Printf("WARNING: failed to unset current CV during dedup: %v", err)
+		}
+		if err := s.queries.MarkCVAsCurrent(ctx, database.MarkCVAsCurrentParams{
+			ID:     existingCV.ID,
+			UserID: pgUserID,
+		}); err != nil {
+			log.Printf("WARNING: failed to re-mark duplicate CV as current: %v", err)
+		}
+		// Re-fetch the CV to get the updated is_current flag
+		existingCV.IsCurrent.Bool = true
+		existingCV.IsCurrent.Valid = true
 		cv := dbCvToModel(existingCV)
 		return &cv, nil
 	}
