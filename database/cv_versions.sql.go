@@ -426,6 +426,22 @@ func (q *Queries) SetCurrentCV(ctx context.Context, userID pgtype.UUID) error {
 	return err
 }
 
+const markCVAsCurrent = `-- name: MarkCVAsCurrent :exec
+UPDATE cv_versions
+SET is_current = true, updated_at = NOW()
+WHERE id = $1 AND user_id = $2
+`
+
+type MarkCVAsCurrentParams struct {
+	ID     pgtype.UUID
+	UserID pgtype.UUID
+}
+
+func (q *Queries) MarkCVAsCurrent(ctx context.Context, arg MarkCVAsCurrentParams) error {
+	_, err := q.db.Exec(ctx, markCVAsCurrent, arg.ID, arg.UserID)
+	return err
+}
+
 const updateCV = `-- name: UpdateCV :one
 UPDATE cv_versions
 SET 

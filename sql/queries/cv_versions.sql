@@ -50,6 +50,11 @@ UPDATE cv_versions
 SET is_current = false
 WHERE user_id = $1 AND is_current = true;
 
+-- name: MarkCVAsCurrent :exec
+UPDATE cv_versions
+SET is_current = true, updated_at = NOW()
+WHERE id = $1 AND user_id = $2;
+
 -- name: UpdateCV :one
 UPDATE cv_versions
 SET 
