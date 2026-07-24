@@ -100,6 +100,7 @@ func main() {
 	quizController := controller.NewQuizController(quizService)
 	appController := controller.NewApplicationController(appService, cvService)
 	savedJobController := controller.NewSavedJobController(db)
+	adminController := controller.NewAdminController(service.NewAdminService(db))
 
 	// 2. Update the router creation call to pass it in
 	handler := router.NewRouter(
@@ -113,6 +114,7 @@ func main() {
 		sandboxController,
 		intelligenceController,
 		savedJobController,
+		adminController,
 		authMiddleware,
 	)
 

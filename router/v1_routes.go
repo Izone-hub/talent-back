@@ -18,6 +18,7 @@ func V1Routes(
 	sandboxController *controller.SandboxController,
 	intelligenceController *controller.IntelligenceController,
 	savedJobController *controller.SavedJobController,
+	adminController *controller.AdminController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -153,11 +154,12 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/admin/dashboard",
 		authMiddleware.Authenticate(
-			authMiddleware.RequireAdmin(
-				func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte("Admin Dashboard"))
-				},
-			),
+			authMiddleware.RequireAdmin(adminController.GetDashboard),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/dashboard/recent-activity",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.GetRecentActivity),
 		),
 	)
 
