@@ -62,6 +62,7 @@ type IntelligenceReport struct {
 	GitHub    GitHubIntelligence `json:"github_intelligence"`
 	CVSignals *CVSignalsResponse `json:"cv_signals,omitempty"`
 	AISummary *AISummaryResponse `json:"ai_summary,omitempty"`
+	QuizAnswers []database.QuizAnswer `json:"quiz_answers,omitempty"`
 }
 
 // --- Handler ---
@@ -153,6 +154,12 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 			Weaknesses: aiSummary.Weaknesses.String,
 			Model:      aiSummary.Model.String,
 		}
+	}
+
+	// 7. Attach quiz answers if available
+	quizAnswers, err := c.queries.GetUserQuizAnswers(r.Context(), pgID)
+	if err == nil {
+		report.QuizAnswers = quizAnswers
 	}
 
 	w.Header().Set("Content-Type", "application/json")
