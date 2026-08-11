@@ -704,11 +704,38 @@ type QuizResult struct {
 	CreatedAt                  pgtype.Timestamp
 }
 
+type SandboxTemplate struct {
+	ID           pgtype.UUID
+	Language     string
+	Name         string
+	Description  pgtype.Text
+	TemplatePath string
+	IsActive     pgtype.Bool
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type SavedJob struct {
 	UserID  pgtype.UUID
 	JobID   pgtype.UUID
 	SavedAt pgtype.Timestamp
 	Notes   pgtype.Text
+}
+
+type Submission struct {
+	ID            pgtype.UUID
+	UserID        uuid.UUID
+	QuestionID    uuid.UUID
+	Language      string
+	Code          string
+	ExecutionType string
+	Passed        pgtype.Bool
+	Stdout        pgtype.Text
+	Stderr        pgtype.Text
+	ExitCode      pgtype.Int4
+	TimeMs        pgtype.Int4
+	ErrorMessage  pgtype.Text
+	SubmittedAt   pgtype.Timestamptz
 }
 
 type Tag struct {

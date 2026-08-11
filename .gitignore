@@ -6,7 +6,6 @@ talent-backend
 
 # Environment
 .env
-
 # Logs
 *.log
 
@@ -22,3 +21,5 @@ cache/
 # OS
 .DS_Store
 Thumbs.db
+history/*
+uploads/*

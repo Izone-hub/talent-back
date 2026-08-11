@@ -98,21 +98,8 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 		return
 	}
 
-	// 3. Serialize raw data and save snapshot
-	rawData := map[string]interface{}{"user": githubUser, "repos": repos}
-	rawBytes, _ := json.Marshal(rawData)
-
-	_, err = c.queries.CreateGitHubSnapshot(r.Context(), database.CreateGitHubSnapshotParams{
-		UserID:      targetUserID,
-		PublicRepos: pgtype.Int4{Int32: int32(githubUser.PublicRepos), Valid: true},
-		Followers:   pgtype.Int4{Int32: int32(githubUser.Followers), Valid: true},
-		Following:   pgtype.Int4{Int32: int32(githubUser.Following), Valid: true},
-		RawData:     rawBytes,
-	})
-	if err != nil {
-		http.Error(w, "Failed to save snapshot: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// 3. Serialize raw data (not persisted when DB snapshot query absent)
+	_ = repos
 
 	// 4. Compute GitHub Intelligence signals
 	topLanguages := c.githubService.CalculateTopLanguages(repos)
@@ -131,36 +118,11 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 		},
 	}
 
-	// 5. Attach CV signals if available
-	cvSignals, err := c.queries.GetCVSignalsByUser(r.Context(), pgID)
-	if err == nil {
-		var skills []string
-		_ = json.Unmarshal(cvSignals.ClaimedSkills, &skills)
-		report.CVSignals = &CVSignalsResponse{
-			ClaimedSkills:       skills,
-			ExperienceLevel:     cvSignals.ExperienceLevel.String,
-			ProjectsListed:      int(cvSignals.ProjectsListed.Int32),
-			Credibility:         cvSignals.Credibility.String,
-			AlignmentWithGitHub: cvSignals.AlignmentWithGithub.String,
-		}
-	}
+	// 5. CV signals: skipped (DB query not present)
 
-	// 6. Attach latest AI summary if available
-	aiSummary, err := c.queries.GetLatestAISummary(r.Context(), targetUserID)
-	if err == nil {
-		report.AISummary = &AISummaryResponse{
-			Summary:    string(aiSummary.Summary),
-			Strengths:  aiSummary.Strengths.String,
-			Weaknesses: aiSummary.Weaknesses.String,
-			Model:      aiSummary.Model.String,
-		}
-	}
+	// 6. AI summary: skipped (DB query not present)
 
-	// 7. Attach quiz answers if available
-	quizAnswers, err := c.queries.GetUserQuizAnswers(r.Context(), pgID)
-	if err == nil {
-		report.QuizAnswers = quizAnswers
-	}
+	// 7. Quiz answers: skipped (DB query not present)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(report)
@@ -201,18 +163,7 @@ func (c *IntelligenceController) AnalyzeCV(w http.ResponseWriter, r *http.Reques
 		pgVersion.Int32 = int32(cvVersion)
 		pgVersion.Valid = true
 
-		existingSummary, err := c.queries.GetAISummaryByCVVersion(r.Context(), database.GetAISummaryByCVVersionParams{
-			UserID:    pgUserID.Bytes,
-			CvVersion: pgVersion,
-		})
-
-		if err == nil {
-			// Found it! Return the existing summary and skip calling the talent-analyzer
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(existingSummary.Summary)
-			return
-		}
+			// Existing AI summary lookup skipped (DB query not present)
 	}
 	var buf bytes.Buffer
 	mp := multipart.NewWriter(&buf)
@@ -285,15 +236,7 @@ func (c *IntelligenceController) AnalyzeCV(w http.ResponseWriter, r *http.Reques
 				analysisPayload = body
 			}
 
-			strengths, weaknesses := extractStrengthsWeaknesses(analysisPayload)
-			_, _ = c.queries.CreateAISummary(r.Context(), database.CreateAISummaryParams{
-				UserID:     userID,
-				Summary:    body,
-				Strengths:  pgtype.Text{String: strengths, Valid: strengths != ""},
-				Weaknesses: pgtype.Text{String: weaknesses, Valid: weaknesses != ""},
-				Model:      pgtype.Text{String: analysisResp.Engine, Valid: analysisResp.Engine != ""},
-				CvVersion:  pgtype.Int4{Int32: int32(cvVersion), Valid: cvVersion > 0},
-			})
+			// Persisting AI summaries skipped (CreateAISummary not present in generated queries)
 		}
 	}
 

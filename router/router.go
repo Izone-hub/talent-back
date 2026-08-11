@@ -19,6 +19,7 @@ func NewRouter(
 	quizController *controller.QuizController,
 	appController *controller.ApplicationController,
 	sandboxController *controller.SandboxController,
+	intelligenceController *controller.IntelligenceController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -52,7 +53,7 @@ func NewRouter(
 	// -----------------------------------------------------------------------
 	// Mount v1 routes directly (Absolute path mapping)
 	// -----------------------------------------------------------------------
-	v1Mux := V1Routes(authController, jobController, cvController, tagController, questionController, quizController, appController, sandboxController, authMiddleware)
+	v1Mux := V1Routes(authController, jobController, cvController, tagController, questionController, quizController, appController, sandboxController, intelligenceController, authMiddleware)
 	mux.Handle("/api/v1/", v1Mux)
 
 	return mux
