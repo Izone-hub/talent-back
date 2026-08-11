@@ -129,6 +129,11 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Admin routes
 	// -----------------------------------------------------------------------
+	mux.HandleFunc("POST /api/v1/admin/generate-job-description",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(intelligenceController.GenerateJobDescription),
+		),
+	)
 	mux.HandleFunc("GET /api/v1/admin/dashboard",
 		authMiddleware.Authenticate(
 			authMiddleware.RequireAdmin(
