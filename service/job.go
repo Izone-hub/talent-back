@@ -337,6 +337,54 @@ func dbJobsToModels(dbJobs []database.Job) []models.Job {
 	return jobs
 }
 
+// SaveJob bookmarks a published job for the user with optional notes.
+func (s *JobService) SaveJob(ctx context.Context, userID, jobID uuid.UUID, notes string) error {
+	notesText := pgtype.Text{String: notes, Valid: notes != ""}
+	return s.queries.SaveJob(ctx, database.SaveJobParams{
+		UserID: uuidToPgUUID(userID),
+		JobID:  uuidToPgUUID(jobID),
+		Notes:  notesText,
+	})
+}
+
+// UnsaveJob removes a saved bookmark for the user.
+func (s *JobService) UnsaveJob(ctx context.Context, userID, jobID uuid.UUID) error {
+	return s.queries.UnsaveJob(ctx, database.UnsaveJobParams{
+		UserID: uuidToPgUUID(userID),
+		JobID:  uuidToPgUUID(jobID),
+	})
+}
+
+// ListSavedJobs returns the authenticated user's saved/bookmarked jobs,
+// paginated, together with the total number of saved jobs.
+func (s *JobService) ListSavedJobs(ctx context.Context, userID uuid.UUID, limit, offset int) ([]database.GetSavedJobsByUserRow, int64, error) {
+	pgUserID := uuidToPgUUID(userID)
+
+	savedJobs, err := s.queries.GetSavedJobsByUser(ctx, database.GetSavedJobsByUserParams{
+		UserID: pgUserID,
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to fetch saved jobs: %w", err)
+	}
+
+	count, err := s.queries.CountSavedJobsByUser(ctx, pgUserID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count saved jobs: %w", err)
+	}
+
+	return savedJobs, count, nil
+}
+
+// IsJobSaved reports whether the authenticated user has bookmarked the given job.
+func (s *JobService) IsJobSaved(ctx context.Context, userID, jobID uuid.UUID) (bool, error) {
+	return s.queries.IsJobSaved(ctx, database.IsJobSavedParams{
+		UserID: uuidToPgUUID(userID),
+		JobID:  uuidToPgUUID(jobID),
+	})
+}
+
 func (s *JobService) enrichJobsWithTags(ctx context.Context, jobs []models.Job) ([]models.Job, error) {
 	if len(jobs) == 0 {
 		return jobs, nil

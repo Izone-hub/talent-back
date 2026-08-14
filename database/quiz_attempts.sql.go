@@ -713,6 +713,204 @@ func (q *Queries) ListAnswers(ctx context.Context, quizAttemptID pgtype.UUID) ([
 	return items, nil
 }
 
+const listQuizAttemptsByJob = `-- name: ListQuizAttemptsByJob :many
+
+SELECT 
+    qa.id AS quiz_id,
+    qa.application_id,
+    qa.user_id AS client_id,
+    qa.job_id,
+    qa.status,
+    qa.score,
+    qa.passed,
+    qa.correct_answers,
+    qa.questions_per_quiz,
+    qa.started_at,
+    qa.completed_at,
+    qa.time_spent_seconds,
+    COALESCE(u.name, a.applicant_name) AS name,
+    COALESCE(u.email, a.applicant_email) AS email,
+    COALESCE(u.github_username, a.github_username) AS github_username,
+    COALESCE(u.avatar_url, a.applicant_avatar_url) AS avatar_url,
+    qr.strengths,
+    qr.weaknesses,
+    qr.ai_feedback
+FROM quiz_attempts qa
+JOIN job_applications a ON qa.application_id = a.id
+JOIN users u ON qa.user_id = u.id
+LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
+WHERE qa.job_id = $1
+ORDER BY qa.completed_at DESC NULLS LAST
+`
+
+type ListQuizAttemptsByJobRow struct {
+	QuizID           pgtype.UUID
+	ApplicationID    pgtype.UUID
+	ClientID         pgtype.UUID
+	JobID            pgtype.UUID
+	Status           QuizAttemptStatus
+	Score            pgtype.Int4
+	Passed           pgtype.Bool
+	CorrectAnswers   pgtype.Int4
+	QuestionsPerQuiz int32
+	StartedAt        pgtype.Timestamp
+	CompletedAt      pgtype.Timestamp
+	TimeSpentSeconds pgtype.Int4
+	Name             pgtype.Text
+	Email            pgtype.Text
+	GithubUsername   string
+	AvatarUrl        pgtype.Text
+	Strengths        []string
+	Weaknesses       []string
+	AiFeedback       pgtype.Text
+}
+
+// List all quiz attempts for a job (admin view), including applicant info
+// and optional AI quiz results
+func (q *Queries) ListQuizAttemptsByJob(ctx context.Context, jobID pgtype.UUID) ([]ListQuizAttemptsByJobRow, error) {
+	rows, err := q.db.Query(ctx, listQuizAttemptsByJob, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuizAttemptsByJobRow
+	for rows.Next() {
+		var i ListQuizAttemptsByJobRow
+		if err := rows.Scan(
+			&i.QuizID,
+			&i.ApplicationID,
+			&i.ClientID,
+			&i.JobID,
+			&i.Status,
+			&i.Score,
+			&i.Passed,
+			&i.CorrectAnswers,
+			&i.QuestionsPerQuiz,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.TimeSpentSeconds,
+			&i.Name,
+			&i.Email,
+			&i.GithubUsername,
+			&i.AvatarUrl,
+			&i.Strengths,
+			&i.Weaknesses,
+			&i.AiFeedback,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQuizAttemptsByUser = `-- name: ListQuizAttemptsByUser :many
+
+SELECT 
+    qa.id AS quiz_id,
+    qa.application_id,
+    qa.user_id,
+    qa.user_id AS client_id,
+    qa.job_id,
+    qa.status,
+    qa.score,
+    qa.passed,
+    qa.correct_answers,
+    qa.questions_per_quiz,
+    qa.started_at,
+    qa.completed_at,
+    qa.time_spent_seconds,
+    j.title AS job_title,
+    j.company AS job_company,
+    COALESCE(u.name, a.applicant_name) AS name,
+    COALESCE(u.email, a.applicant_email) AS email,
+    COALESCE(u.github_username, a.github_username) AS github_username,
+    COALESCE(u.avatar_url, a.applicant_avatar_url) AS avatar_url,
+    qr.strengths,
+    qr.weaknesses,
+    qr.ai_feedback
+FROM quiz_attempts qa
+JOIN job_applications a ON qa.application_id = a.id
+JOIN users u ON qa.user_id = u.id
+JOIN jobs j ON qa.job_id = j.id
+LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
+WHERE qa.user_id = $1
+ORDER BY qa.completed_at DESC NULLS LAST
+`
+
+type ListQuizAttemptsByUserRow struct {
+	QuizID           pgtype.UUID
+	ApplicationID    pgtype.UUID
+	UserID           pgtype.UUID
+	ClientID         pgtype.UUID
+	JobID            pgtype.UUID
+	Status           QuizAttemptStatus
+	Score            pgtype.Int4
+	Passed           pgtype.Bool
+	CorrectAnswers   pgtype.Int4
+	QuestionsPerQuiz int32
+	StartedAt        pgtype.Timestamp
+	CompletedAt      pgtype.Timestamp
+	TimeSpentSeconds pgtype.Int4
+	JobTitle         string
+	JobCompany       string
+	Name             pgtype.Text
+	Email            pgtype.Text
+	GithubUsername   string
+	AvatarUrl        pgtype.Text
+	Strengths        []string
+	Weaknesses       []string
+	AiFeedback       pgtype.Text
+}
+
+// List all quiz attempts for a user (admin view), across all jobs,
+// including job info, applicant info and optional AI quiz results
+func (q *Queries) ListQuizAttemptsByUser(ctx context.Context, userID pgtype.UUID) ([]ListQuizAttemptsByUserRow, error) {
+	rows, err := q.db.Query(ctx, listQuizAttemptsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuizAttemptsByUserRow
+	for rows.Next() {
+		var i ListQuizAttemptsByUserRow
+		if err := rows.Scan(
+			&i.QuizID,
+			&i.ApplicationID,
+			&i.UserID,
+			&i.ClientID,
+			&i.JobID,
+			&i.Status,
+			&i.Score,
+			&i.Passed,
+			&i.CorrectAnswers,
+			&i.QuestionsPerQuiz,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.TimeSpentSeconds,
+			&i.JobTitle,
+			&i.JobCompany,
+			&i.Name,
+			&i.Email,
+			&i.GithubUsername,
+			&i.AvatarUrl,
+			&i.Strengths,
+			&i.Weaknesses,
+			&i.AiFeedback,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markForReview = `-- name: MarkForReview :exec
 UPDATE quiz_answers
 SET is_reviewed = true

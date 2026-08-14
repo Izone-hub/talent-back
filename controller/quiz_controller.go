@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Izone-hub/talent-backend/service"
+	"github.com/google/uuid"
 )
 
 type QuizController struct {
@@ -228,6 +229,73 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Quiz submitted successfully"})
+}
+
+// GetQuizReview handler returns the full question-by-question review of a
+// quiz attempt. Available to the attempt owner or any admin.
+func (c *QuizController) GetQuizReview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	id := r.PathValue("id")
+	isAdmin := claims.Role == "admin"
+
+	review, err := c.quizService.GetQuizReview(r.Context(), id, claims.UserID.String(), isAdmin)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "invalid attempt ID"),
+			err.Error() == "no rows in result set":
+			writeError(w, http.StatusNotFound, "Quiz attempt not found: "+err.Error())
+		case strings.Contains(err.Error(), "does not belong"):
+			writeError(w, http.StatusForbidden, "You cannot view this quiz attempt")
+		default:
+			writeError(w, http.StatusInternalServerError, "Failed to get quiz review: "+err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, review)
+}
+
+// ListJobQuizzes handler lists all quiz attempts taken for a job
+// (admin only), including applicant data and quiz results.
+func (c *QuizController) ListJobQuizzes(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := uuid.Parse(id); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+
+	quizzes, err := c.quizService.GetJobQuizAttempts(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list quizzes: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, quizzes)
+}
+
+// ListUserQuizzes handler lists all quiz attempts taken by a user across all
+// jobs (admin only), including job info, applicant data and quiz results.
+func (c *QuizController) ListUserQuizzes(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := uuid.Parse(id); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	quizzes, err := c.quizService.GetUserQuizAttempts(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list quizzes: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, quizzes)
 }
 
 // --- Uniform Helper Fallbacks ---

@@ -127,6 +127,72 @@ SELECT * FROM quiz_answer_history
 WHERE quiz_answer_id = $1
 ORDER BY saved_at DESC;
 
+-- List all quiz attempts for a job (admin view), including applicant info
+-- and optional AI quiz results
+
+-- name: ListQuizAttemptsByJob :many
+SELECT 
+    qa.id AS quiz_id,
+    qa.application_id,
+    qa.user_id AS client_id,
+    qa.job_id,
+    qa.status,
+    qa.score,
+    qa.passed,
+    qa.correct_answers,
+    qa.questions_per_quiz,
+    qa.started_at,
+    qa.completed_at,
+    qa.time_spent_seconds,
+    COALESCE(u.name, a.applicant_name) AS name,
+    COALESCE(u.email, a.applicant_email) AS email,
+    COALESCE(u.github_username, a.github_username) AS github_username,
+    COALESCE(u.avatar_url, a.applicant_avatar_url) AS avatar_url,
+    qr.strengths,
+    qr.weaknesses,
+    qr.ai_feedback
+FROM quiz_attempts qa
+JOIN job_applications a ON qa.application_id = a.id
+JOIN users u ON qa.user_id = u.id
+LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
+WHERE qa.job_id = $1
+ORDER BY qa.completed_at DESC NULLS LAST;
+
+-- List all quiz attempts for a user (admin view), across all jobs,
+-- including job info, applicant info and optional AI quiz results
+
+-- name: ListQuizAttemptsByUser :many
+SELECT 
+    qa.id AS quiz_id,
+    qa.application_id,
+    qa.user_id,
+    qa.user_id AS client_id,
+    qa.job_id,
+    qa.status,
+    qa.score,
+    qa.passed,
+    qa.correct_answers,
+    qa.questions_per_quiz,
+    qa.started_at,
+    qa.completed_at,
+    qa.time_spent_seconds,
+    j.title AS job_title,
+    j.company AS job_company,
+    COALESCE(u.name, a.applicant_name) AS name,
+    COALESCE(u.email, a.applicant_email) AS email,
+    COALESCE(u.github_username, a.github_username) AS github_username,
+    COALESCE(u.avatar_url, a.applicant_avatar_url) AS avatar_url,
+    qr.strengths,
+    qr.weaknesses,
+    qr.ai_feedback
+FROM quiz_attempts qa
+JOIN job_applications a ON qa.application_id = a.id
+JOIN users u ON qa.user_id = u.id
+JOIN jobs j ON qa.job_id = j.id
+LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
+WHERE qa.user_id = $1
+ORDER BY qa.completed_at DESC NULLS LAST;
+
 -- Quiz results
 
 -- name: CreateQuizResults :one

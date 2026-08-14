@@ -7,8 +7,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/models"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,12 +26,360 @@ type QuizAttempt struct {
 
 // QuizService handles all quiz logic and database calls
 type QuizService struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	queries *database.Queries
 }
 
 // NewQuizService receives the *pgxpool.Pool sent from main.go
 func NewQuizService(pool *pgxpool.Pool) *QuizService {
-	return &QuizService{pool: pool}
+	return &QuizService{pool: pool, queries: database.New(pool)}
+}
+
+// JobQuizApplicant holds the applicant data attached to an admin quiz view.
+type JobQuizApplicant struct {
+	Name           string `json:"name"`
+	Email          string `json:"email"`
+	GithubUsername string `json:"github_username"`
+	AvatarURL      string `json:"avatar_url"`
+}
+
+// JobQuizResults holds the optional AI-generated results of a quiz attempt.
+type JobQuizResults struct {
+	Strengths  []string `json:"strengths"`
+	Weaknesses []string `json:"weaknesses"`
+	AIFeedback string   `json:"ai_feedback"`
+}
+
+// JobQuizAttempt is the admin view of a quiz attempt taken for a job.
+type JobQuizAttempt struct {
+	ID               uuid.UUID        `json:"id"`
+	ApplicationID    uuid.UUID        `json:"application_id"`
+	JobApplicationID uuid.UUID        `json:"job_application_id"`
+	UserID           uuid.UUID        `json:"user_id"`
+	ClientID         uuid.UUID        `json:"client_id"`
+	JobID            uuid.UUID        `json:"job_id"`
+	JobTitle         string           `json:"job_title,omitempty"`
+	JobCompany       string           `json:"job_company,omitempty"`
+	Status           string           `json:"status"`
+	Score            *int32           `json:"score"`
+	Passed           *bool            `json:"passed"`
+	CorrectAnswers   *int32           `json:"correct_answers"`
+	QuestionsPerQuiz int32            `json:"questions_per_quiz"`
+	StartedAt        *time.Time       `json:"started_at"`
+	CompletedAt      *time.Time       `json:"completed_at"`
+	TimeSpentSeconds *int32           `json:"time_spent_seconds"`
+	Applicant        JobQuizApplicant `json:"applicant"`
+	QuizResults      *JobQuizResults  `json:"quiz_results,omitempty"`
+}
+
+// GetJobQuizAttempts lists all quiz attempts taken for a given job (admin
+// view), including the applicant data and optional AI quiz results.
+func (s *QuizService) GetJobQuizAttempts(ctx context.Context, jobID string) ([]JobQuizAttempt, error) {
+	jobUUID, err := uuid.Parse(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid job ID: %w", err)
+	}
+
+	var pgJobID pgtype.UUID
+	copy(pgJobID.Bytes[:], jobUUID[:])
+	pgJobID.Valid = true
+
+	rows, err := s.queries.ListQuizAttemptsByJob(ctx, pgJobID)
+	if err != nil {
+		return nil, err
+	}
+
+	attempts := make([]JobQuizAttempt, 0, len(rows))
+	for _, row := range rows {
+		attempt := JobQuizAttempt{
+			Status:           string(row.Status),
+			Score:            int4Ptr(row.Score),
+			Passed:           boolPtr(row.Passed),
+			CorrectAnswers:   int4Ptr(row.CorrectAnswers),
+			QuestionsPerQuiz: row.QuestionsPerQuiz,
+			StartedAt:        timestampPtr(row.StartedAt),
+			CompletedAt:      timestampPtr(row.CompletedAt),
+			TimeSpentSeconds: int4Ptr(row.TimeSpentSeconds),
+			Applicant: JobQuizApplicant{
+				Name:           row.Name.String,
+				Email:          row.Email.String,
+				GithubUsername: row.GithubUsername,
+				AvatarURL:      row.AvatarUrl.String,
+			},
+		}
+
+		if id, err := uuid.FromBytes(row.QuizID.Bytes[:]); err == nil {
+			attempt.ID = id
+		}
+		if id, err := uuid.FromBytes(row.ApplicationID.Bytes[:]); err == nil {
+			attempt.ApplicationID = id
+			attempt.JobApplicationID = id
+		}
+		if id, err := uuid.FromBytes(row.ClientID.Bytes[:]); err == nil {
+			attempt.ClientID = id
+			attempt.UserID = id
+		}
+		if id, err := uuid.FromBytes(row.JobID.Bytes[:]); err == nil {
+			attempt.JobID = id
+		}
+
+		if row.Strengths != nil || row.Weaknesses != nil || row.AiFeedback.Valid {
+			attempt.QuizResults = &JobQuizResults{
+				Strengths:  row.Strengths,
+				Weaknesses: row.Weaknesses,
+				AIFeedback: row.AiFeedback.String,
+			}
+		}
+
+		attempts = append(attempts, attempt)
+	}
+
+	return attempts, nil
+}
+
+// GetUserQuizAttempts lists all quiz attempts taken by a given user across
+// all jobs (admin view), including job info, applicant data and optional AI
+// quiz results.
+func (s *QuizService) GetUserQuizAttempts(ctx context.Context, userID string) ([]JobQuizAttempt, error) {
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	var pgUserID pgtype.UUID
+	copy(pgUserID.Bytes[:], userUUID[:])
+	pgUserID.Valid = true
+
+	rows, err := s.queries.ListQuizAttemptsByUser(ctx, pgUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	attempts := make([]JobQuizAttempt, 0, len(rows))
+	for _, row := range rows {
+		attempt := JobQuizAttempt{
+			JobTitle:         row.JobTitle,
+			JobCompany:       row.JobCompany,
+			Status:           string(row.Status),
+			Score:            int4Ptr(row.Score),
+			Passed:           boolPtr(row.Passed),
+			CorrectAnswers:   int4Ptr(row.CorrectAnswers),
+			QuestionsPerQuiz: row.QuestionsPerQuiz,
+			StartedAt:        timestampPtr(row.StartedAt),
+			CompletedAt:      timestampPtr(row.CompletedAt),
+			TimeSpentSeconds: int4Ptr(row.TimeSpentSeconds),
+			Applicant: JobQuizApplicant{
+				Name:           row.Name.String,
+				Email:          row.Email.String,
+				GithubUsername: row.GithubUsername,
+				AvatarURL:      row.AvatarUrl.String,
+			},
+		}
+
+		if id, err := uuid.FromBytes(row.QuizID.Bytes[:]); err == nil {
+			attempt.ID = id
+		}
+		if id, err := uuid.FromBytes(row.ApplicationID.Bytes[:]); err == nil {
+			attempt.ApplicationID = id
+			attempt.JobApplicationID = id
+		}
+		if id, err := uuid.FromBytes(row.ClientID.Bytes[:]); err == nil {
+			attempt.ClientID = id
+			attempt.UserID = id
+		}
+		if id, err := uuid.FromBytes(row.JobID.Bytes[:]); err == nil {
+			attempt.JobID = id
+		}
+
+		if row.Strengths != nil || row.Weaknesses != nil || row.AiFeedback.Valid {
+			attempt.QuizResults = &JobQuizResults{
+				Strengths:  row.Strengths,
+				Weaknesses: row.Weaknesses,
+				AIFeedback: row.AiFeedback.String,
+			}
+		}
+
+		attempts = append(attempts, attempt)
+	}
+
+	return attempts, nil
+}
+
+// QuizReviewAnswer is a single answered question within a quiz attempt review.
+type QuizReviewAnswer struct {
+	QuestionID       uuid.UUID       `json:"question_id"`
+	QuestionText     string          `json:"question_text"`
+	QuestionType     string          `json:"question_type"`
+	Difficulty       string          `json:"difficulty"`
+	Options          json.RawMessage `json:"options"`
+	UserAnswer       *string         `json:"user_answer"`
+	CorrectAnswer    *string         `json:"correct_answer"`
+	IsCorrect        *bool           `json:"is_correct"`
+	IsSkipped        bool            `json:"is_skipped"`
+	Explanation      *string         `json:"explanation"`
+	TimeSpentSeconds int32           `json:"time_spent_seconds"`
+	CodeOutput       *string         `json:"code_output"`
+	CreatedAt        time.Time       `json:"created_at"`
+}
+
+// QuizReview is the full question-by-question view of a quiz attempt,
+// including every question the applicant took for the job.
+type QuizReview struct {
+	ID                uuid.UUID         `json:"id"`
+	ApplicationID     uuid.UUID         `json:"application_id"`
+	JobApplicationID  uuid.UUID         `json:"job_application_id"`
+	UserID            uuid.UUID         `json:"user_id"`
+	JobID             uuid.UUID         `json:"job_id"`
+	JobTitle          string            `json:"job_title,omitempty"`
+	JobCompany        string            `json:"job_company,omitempty"`
+	Title             string            `json:"title"`
+	Status            string            `json:"status"`
+	Score             *int32            `json:"score"`
+	Passed            *bool             `json:"passed"`
+	CorrectAnswers    *int32            `json:"correct_answers"`
+	TotalQuestions    int32             `json:"total_questions"`
+	AnsweredQuestions int32             `json:"answered_questions"`
+	PassingScore      int32             `json:"passing_score"`
+	StartedAt         *time.Time        `json:"started_at"`
+	CompletedAt       *time.Time        `json:"completed_at"`
+	TimeSpentSeconds  *int32            `json:"time_spent_seconds"`
+	Answers           []QuizReviewAnswer `json:"answers"`
+}
+
+// GetQuizReview returns the full question-by-question review of a quiz
+// attempt. The attempt owner can always view their own attempt; admins can
+// view any attempt.
+func (s *QuizService) GetQuizReview(ctx context.Context, attemptID, requesterID string, isAdmin bool) (*QuizReview, error) {
+	attemptUUID, err := uuid.Parse(attemptID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid attempt ID: %w", err)
+	}
+
+	// Load the attempt plus job context
+	var (
+		appID, userID, jobID uuid.UUID
+		jobTitle, jobCompany string
+		status               string
+		score                pgtype.Int4
+		passed               pgtype.Bool
+		correctAnswers       pgtype.Int4
+		questionsPerQuiz     int32
+		totalQuestions       int32
+		passingScore         int32
+		startedAt            pgtype.Timestamp
+		completedAt          pgtype.Timestamp
+		timeSpent            pgtype.Int4
+	)
+
+	err = s.pool.QueryRow(ctx, `
+		SELECT qa.application_id, qa.user_id, qa.job_id,
+		       COALESCE(j.title, 'Quiz') AS job_title,
+		       COALESCE(j.company, '') AS job_company,
+		       qa.status, qa.score, qa.passed, qa.correct_answers,
+		       qa.questions_per_quiz, qa.total_questions, qa.passing_score,
+		       qa.started_at, qa.completed_at, qa.time_spent_seconds
+		FROM quiz_attempts qa
+		LEFT JOIN jobs j ON qa.job_id = j.id
+		WHERE qa.id = $1
+	`, attemptUUID).Scan(
+		&appID, &userID, &jobID, &jobTitle, &jobCompany, &status,
+		&score, &passed, &correctAnswers,
+		&questionsPerQuiz, &totalQuestions, &passingScore,
+		&startedAt, &completedAt, &timeSpent,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Authorization: the attempt owner or an admin
+	if !isAdmin {
+		requesterUUID, err := uuid.Parse(requesterID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid requester ID: %w", err)
+		}
+		if userID != requesterUUID {
+			return nil, fmt.Errorf("quiz attempt does not belong to this user")
+		}
+	}
+
+	// Load every question the applicant answered for this attempt
+	rows, err := s.pool.Query(ctx, `
+		SELECT q.id, q.question_text, q.question_type, q.difficulty, q.options,
+		       q.correct_answer, q.explanation,
+		       qa.user_answer, qa.is_correct, qa.is_skipped,
+		       qa.time_spent_seconds, qa.code_output, qa.created_at
+		FROM quiz_answers qa
+		JOIN questions q ON q.id = qa.question_id
+		WHERE qa.quiz_attempt_id = $1
+		ORDER BY qa.created_at ASC
+	`, attemptUUID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	answers := make([]QuizReviewAnswer, 0)
+	for rows.Next() {
+		var a QuizReviewAnswer
+		var questionID uuid.UUID
+		var options []byte
+		var userAnswer, correctAnswer, explanation, codeOutput *string
+		var isCorrect *bool
+		var isSkipped bool
+		var timeSpentSeconds int32
+		var createdAt time.Time
+
+		if err := rows.Scan(
+			&questionID, &a.QuestionText, &a.QuestionType, &a.Difficulty, &options,
+			&correctAnswer, &explanation,
+			&userAnswer, &isCorrect, &isSkipped,
+			&timeSpentSeconds, &codeOutput, &createdAt,
+		); err != nil {
+			return nil, err
+		}
+
+		a.QuestionID = questionID
+		a.UserAnswer = userAnswer
+		a.CorrectAnswer = correctAnswer
+		a.IsCorrect = isCorrect
+		a.IsSkipped = isSkipped
+		a.Explanation = explanation
+		a.TimeSpentSeconds = timeSpentSeconds
+		a.CodeOutput = codeOutput
+		a.CreatedAt = createdAt
+		if options == nil {
+			a.Options = json.RawMessage(`[]`)
+		} else {
+			a.Options = json.RawMessage(options)
+		}
+
+		answers = append(answers, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &QuizReview{
+		ID:                attemptUUID,
+		ApplicationID:     appID,
+		JobApplicationID:  appID,
+		UserID:            userID,
+		JobID:             jobID,
+		JobTitle:          jobTitle,
+		JobCompany:        jobCompany,
+		Title:             jobTitle,
+		Status:            status,
+		Score:             int4Ptr(score),
+		Passed:            boolPtr(passed),
+		CorrectAnswers:    int4Ptr(correctAnswers),
+		TotalQuestions:    questionsPerQuiz,
+		AnsweredQuestions: int32(len(answers)),
+		PassingScore:      passingScore,
+		StartedAt:         timestampPtr(startedAt),
+		CompletedAt:       timestampPtr(completedAt),
+		TimeSpentSeconds:  int4Ptr(timeSpent),
+		Answers:           answers,
+	}, nil
 }
 
 // GetUserQuizzes retrieves all quiz attempts belonging to a specific user
@@ -520,4 +870,26 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 	}
 
 	return tx.Commit(ctx)
+}
+
+func int4Ptr(v pgtype.Int4) *int32 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int32
+}
+
+func boolPtr(v pgtype.Bool) *bool {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Bool
+}
+
+func timestampPtr(v pgtype.Timestamp) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	t := v.Time
+	return &t
 }

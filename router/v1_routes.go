@@ -36,6 +36,10 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/jobs", authMiddleware.OptionalAuthenticate(jobController.ListPublishedJobs))
 	mux.HandleFunc("GET /api/v1/jobs/{id}", jobController.GetPublishedJob)
+	mux.HandleFunc("POST /api/v1/jobs/{id}/save", authMiddleware.Authenticate(jobController.SaveJob))
+	mux.HandleFunc("DELETE /api/v1/jobs/{id}/save", authMiddleware.Authenticate(jobController.UnsaveJob))
+	mux.HandleFunc("GET /api/v1/jobs/saved", authMiddleware.Authenticate(jobController.ListSavedJobs))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/saved", authMiddleware.Authenticate(jobController.IsJobSaved))
 	mux.HandleFunc("POST /api/v1/jobs", authMiddleware.Authenticate(jobController.CreateJob))
 	mux.HandleFunc("GET /api/v1/jobs/my", authMiddleware.Authenticate(jobController.ListMyJobs))
 	mux.HandleFunc("PUT /api/v1/jobs/{id}", authMiddleware.Authenticate(jobController.UpdateJob))
@@ -68,6 +72,8 @@ func V1Routes(
 	mux.HandleFunc("PATCH /api/v1/applications/{id}/feedback", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.AddEmployerFeedback)))
 	mux.HandleFunc("GET /api/v1/jobs/{id}/applications", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetJobApplications)))
 	mux.HandleFunc("GET /api/v1/jobs/{id}/applications/counts", authMiddleware.Authenticate(authMiddleware.RequireAdmin(appController.GetApplicationCountsByJob)))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/quizzes", authMiddleware.Authenticate(authMiddleware.RequireAdmin(quizController.ListJobQuizzes)))
+	mux.HandleFunc("GET /api/v1/users/{id}/quizzes", authMiddleware.Authenticate(authMiddleware.RequireAdmin(quizController.ListUserQuizzes)))
 
 	// -----------------------------------------------------------------------
 	// CV routes — Protected
@@ -128,6 +134,10 @@ func V1Routes(
 
 	// 7. Finish and score the quiz
 	mux.HandleFunc("POST /api/v1/quizzes/{id}/submit", authMiddleware.Authenticate(quizController.SubmitQuiz))
+
+	// 8. Full question-by-question review of an attempt (owner or admin)
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/review", authMiddleware.Authenticate(quizController.GetQuizReview))
+
 	// Example registration in main.go
 	mux.HandleFunc("GET /api/v1/quizzes/{id}/next", authMiddleware.Authenticate(quizController.GetNextQuestion))
 
@@ -152,6 +162,11 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Admin routes
 	// -----------------------------------------------------------------------
+	mux.HandleFunc("POST /api/v1/admin/generate-job-description",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(intelligenceController.GenerateJobDescription),
+		),
+	)
 	mux.HandleFunc("GET /api/v1/admin/dashboard",
 		authMiddleware.Authenticate(
 			authMiddleware.RequireAdmin(adminController.GetDashboard),

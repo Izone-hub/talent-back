@@ -293,3 +293,99 @@ func (c *JobController) ArchiveJob(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, job.ToResponse())
 }
+
+// POST /api/v1/jobs/{id}/save — Save/bookmark a job for the authenticated user
+func (c *JobController) SaveJob(w http.ResponseWriter, r *http.Request) {
+	userID, ok := getUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	jobID, err := parseJobID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+
+	var req struct{
+		Notes string `json:"notes"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if err := c.jobService.SaveJob(r.Context(), userID, jobID, req.Notes); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save job: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Job saved"})
+}
+
+// DELETE /api/v1/jobs/{id}/save — Unsave/remove bookmark
+func (c *JobController) UnsaveJob(w http.ResponseWriter, r *http.Request) {
+	userID, ok := getUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	jobID, err := parseJobID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+
+	if err := c.jobService.UnsaveJob(r.Context(), userID, jobID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to unsave job: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Job unsaved"})
+}
+
+// GET /api/v1/jobs/saved — List the authenticated user's saved/bookmarked jobs
+func (c *JobController) ListSavedJobs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := getUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	limit, offset := parsePagination(r)
+
+	savedJobs, total, err := c.jobService.ListSavedJobs(r.Context(), userID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to fetch saved jobs: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"saved_jobs": savedJobs,
+		"total":      total,
+		"limit":      limit,
+		"offset":     offset,
+	})
+}
+
+// GET /api/v1/jobs/{id}/saved — Check if the authenticated user saved a job
+func (c *JobController) IsJobSaved(w http.ResponseWriter, r *http.Request) {
+	userID, ok := getUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	jobID, err := parseJobID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+
+	isSaved, err := c.jobService.IsJobSaved(r.Context(), userID, jobID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to check saved status")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"is_saved": isSaved})
+}

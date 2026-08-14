@@ -6,7 +6,6 @@ talent-backend
 
 # Environment
 .env
-
 # Logs
 *.log
 

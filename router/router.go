@@ -33,10 +33,12 @@ func NewRouter(
 			http.NotFound(w, r)
 			return
 		}
+
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok","message":"iZone Talent API is running"}`))
@@ -46,16 +48,39 @@ func NewRouter(
 	// Serve sandbox test frontend
 	// -----------------------------------------------------------------------
 	staticDir, _ := filepath.Abs("static")
+
 	if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
 		fs := http.FileServer(http.Dir(staticDir))
-		mux.Handle("GET /sandbox-test", http.StripPrefix("/sandbox-test", fs))
-		mux.Handle("GET /sandbox-test/", http.StripPrefix("/sandbox-test", fs))
+
+		mux.Handle(
+			"GET /sandbox-test",
+			http.StripPrefix("/sandbox-test", fs),
+		)
+
+		mux.Handle(
+			"GET /sandbox-test/",
+			http.StripPrefix("/sandbox-test", fs),
+		)
 	}
 
 	// -----------------------------------------------------------------------
-	// Mount v1 routes directly (Absolute path mapping)
+	// Mount v1 routes directly
 	// -----------------------------------------------------------------------
-	v1Mux := V1Routes(authController, jobController, cvController, tagController, questionController, quizController, appController, sandboxController, intelligenceController, savedJobController, adminController, authMiddleware)
+	v1Mux := V1Routes(
+		authController,
+		jobController,
+		cvController,
+		tagController,
+		questionController,
+		quizController,
+		appController,
+		sandboxController,
+		intelligenceController,
+		savedJobController,
+		adminController,
+		authMiddleware,
+	)
+
 	mux.Handle("/api/v1/", v1Mux)
 
 	return mux
