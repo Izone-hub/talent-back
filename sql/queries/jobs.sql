@@ -24,9 +24,18 @@ ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: ListPublishedJobs :many
-SELECT * FROM jobs
-WHERE status = 'published'
-ORDER BY published_at DESC
+SELECT j.*,
+       jsonb_build_object(
+           'applied', ja.id IS NOT NULL,
+           'application_id', ja.id,
+           'status', ja.status,
+           'submitted_at', ja.submitted_at
+       ) AS user_application
+FROM jobs j
+LEFT JOIN job_applications ja 
+    ON ja.job_id = j.id AND ja.user_id = $3
+WHERE j.status = 'published'
+ORDER BY j.published_at DESC
 LIMIT $1 OFFSET $2;
 
 -- name: UpdateJob :one
@@ -73,3 +82,18 @@ RETURNING *;
 
 -- name: IncrementJobViews :exec
 UPDATE jobs SET views_count = views_count + 1 WHERE id = $1;
+
+-- name: ListAllPublishedJobs :many
+SELECT 
+    j.*,
+    CASE 
+        WHEN ja.id IS NOT NULL THEN 'applied'
+        ELSE 'not_applied'
+    END AS application_status
+FROM jobs j 
+LEFT JOIN job_applications ja 
+    ON ja.job_id = j.id 
+    AND ja.user_id = $3 
+WHERE j.status = 'published' 
+ORDER BY j.published_at DESC 
+LIMIT $1 OFFSET $2;

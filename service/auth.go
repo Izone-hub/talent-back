@@ -26,8 +26,8 @@ type Claims struct {
 	UserID         uuid.UUID `json:"user_id"`
 	GithubID       int64     `json:"github_id"`
 	GithubUsername string    `json:"github_username"`
-	ApplicationID uuid.UUID `json:"application_id"` // Add this
-    JobID         uuid.UUID `json:"job_id"`         // Add this
+	ApplicationID  uuid.UUID `json:"application_id"` // Add this
+	JobID          uuid.UUID `json:"job_id"`         // Add this
 	Role           string    `json:"role"`
 	jwt.RegisteredClaims
 }
@@ -105,17 +105,17 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 		}
 
 		adminPermissions, err := json.Marshal(map[string]bool{
-			"manage_jobs":           true,
-			"manage_questions":      true,
-			"manage_tags":           true,
-			"manage_weights":        true,
-			"manage_difficulties":   true,
-			"view_applicants":       true,
-			"view_cvs":              true,
-			"view_github_metadata":  true,
-			"view_ai_summaries":     true,
+			"manage_jobs":              true,
+			"manage_questions":         true,
+			"manage_tags":              true,
+			"manage_weights":           true,
+			"manage_difficulties":      true,
+			"view_applicants":          true,
+			"view_cvs":                 true,
+			"view_github_metadata":     true,
+			"view_ai_summaries":        true,
 			"view_applicant_summaries": true,
-			"view_audit_logs":       true,
+			"view_audit_logs":          true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal admin permissions: %w", err)
@@ -158,10 +158,8 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 func (s *AuthService) upsertUserFromGitHub(ctx context.Context, githubUser *GitHubUser, tokenResponse *GitHubTokenResponse, topLanguages []string) (database.User, error) {
 	expiresAt := time.Now().AddDate(1, 0, 0)
 
-	// Convert topLanguages slice to PostgreSQL array
-	var topLanguagesArray []string
-	if len(topLanguages) > 0 {
-		topLanguagesArray = topLanguages
+	if topLanguages == nil {
+		topLanguages = []string{}
 	}
 
 	return s.queries.CreateOrUpdateUser(ctx, database.CreateOrUpdateUserParams{
@@ -182,7 +180,8 @@ func (s *AuthService) upsertUserFromGitHub(ctx context.Context, githubUser *GitH
 		Location:             strToPgText(githubUser.Location),
 		Bio:                  strToPgText(githubUser.Bio),
 		TwitterUsername:      strToPgText(githubUser.TwitterUsername),
-		TopLanguages:         topLanguagesArray,
+		TopLanguages:         topLanguages,
+		ContributionCount:    pgtype.Int4{Int32: 0, Valid: true},
 	})
 }
 
@@ -192,6 +191,14 @@ func dbUserToModel(u database.User) models.User {
 	if u.ID.Valid {
 		id, _ = uuid.FromBytes(u.ID.Bytes[:])
 	}
+
+	var topLangs []string
+	if u.TopLanguages != nil {
+		topLangs = u.TopLanguages
+	} else {
+		topLangs = []string{}
+	}
+
 	return models.User{
 		ID:                   id,
 		GithubID:             u.GithubID,
@@ -215,7 +222,8 @@ func dbUserToModel(u database.User) models.User {
 		Location:             pgTextToStrPtr(u.Location),
 		Bio:                  pgTextToStrPtr(u.Bio),
 		TwitterUsername:      pgTextToStrPtr(u.TwitterUsername),
-		TopLanguages:         u.TopLanguages,
+		TopLanguages:         topLangs,
+		ContributionCount:    int(u.ContributionCount.Int32),
 	}
 }
 

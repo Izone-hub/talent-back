@@ -17,6 +17,8 @@ func V1Routes(
 	appController *controller.ApplicationController,
 	sandboxController *controller.SandboxController,
 	intelligenceController *controller.IntelligenceController,
+	savedJobController *controller.SavedJobController,
+	adminController *controller.AdminController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -32,7 +34,7 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Job routes
 	// -----------------------------------------------------------------------
-	mux.HandleFunc("GET /api/v1/jobs", jobController.ListPublishedJobs)
+	mux.HandleFunc("GET /api/v1/jobs", authMiddleware.OptionalAuthenticate(jobController.ListPublishedJobs))
 	mux.HandleFunc("GET /api/v1/jobs/{id}", jobController.GetPublishedJob)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/save", authMiddleware.Authenticate(jobController.SaveJob))
 	mux.HandleFunc("DELETE /api/v1/jobs/{id}/save", authMiddleware.Authenticate(jobController.UnsaveJob))
@@ -45,6 +47,14 @@ func V1Routes(
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/close", authMiddleware.Authenticate(jobController.CloseJob))
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/archive", authMiddleware.Authenticate(jobController.ArchiveJob))
 	mux.HandleFunc("POST /api/v1/jobs/{id}/apply", authMiddleware.Authenticate(appController.ApplyForJob))
+
+	// -----------------------------------------------------------------------
+	// Saved Jobs routes — Protected
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /api/v1/jobs/saved", authMiddleware.Authenticate(savedJobController.ListSavedJobs))
+	mux.HandleFunc("POST /api/v1/jobs/{id}/save", authMiddleware.Authenticate(savedJobController.SaveJob))
+	mux.HandleFunc("DELETE /api/v1/jobs/{id}/save", authMiddleware.Authenticate(savedJobController.UnsaveJob))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/saved", authMiddleware.Authenticate(savedJobController.IsJobSaved))
 
 	// -----------------------------------------------------------------------
 	// Application routes
@@ -138,6 +148,18 @@ func V1Routes(
 	mux.HandleFunc("POST /api/v1/sandbox/execute", authMiddleware.Authenticate(sandboxController.Execute))
 
 	// -----------------------------------------------------------------------
+	// Intelligence routes
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("POST /api/v1/intelligence/github/{id}/fetch", authMiddleware.Authenticate(intelligenceController.FetchGitHubSnapshot))
+	mux.HandleFunc("POST /api/v1/analyze-cv", intelligenceController.AnalyzeCV)
+
+	// -----------------------------------------------------------------------
+	// User review dashboard routes
+	// -----------------------------------------------------------------------
+
+	mux.HandleFunc("GET /api/v1/application-information/{id}", authMiddleware.Authenticate(appController.GetApplicationInformation))
+
+	// -----------------------------------------------------------------------
 	// Admin routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("POST /api/v1/admin/generate-job-description",
@@ -147,11 +169,12 @@ func V1Routes(
 	)
 	mux.HandleFunc("GET /api/v1/admin/dashboard",
 		authMiddleware.Authenticate(
-			authMiddleware.RequireAdmin(
-				func(w http.ResponseWriter, r *http.Request) {
-					w.Write([]byte("Admin Dashboard"))
-				},
-			),
+			authMiddleware.RequireAdmin(adminController.GetDashboard),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/dashboard/recent-activity",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.GetRecentActivity),
 		),
 	)
 

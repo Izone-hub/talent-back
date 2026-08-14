@@ -34,7 +34,10 @@ func main() {
 	log.Println("Connected to database successfully")
 
 	// Temporary migration to fix 'pending' applications
-	_, err = db.Exec(context.Background(), "UPDATE job_applications SET status = 'submitted' WHERE status = 'pending'")
+	_, err = db.Exec(
+		context.Background(),
+		"UPDATE job_applications SET status = 'submitted' WHERE status = 'pending'",
+	)
 	if err != nil {
 		log.Printf("Failed to run status migration: %v", err)
 	} else {
@@ -70,7 +73,6 @@ func main() {
 		log.Println("Successfully synced question_tags junction table mappings")
 	}
 
-
 	// Initialize services
 	githubService := service.NewGithubService(&cfg)
 	authService := service.NewAuthService(&cfg, githubService, db)
@@ -93,15 +95,20 @@ func main() {
 
 	// Initialize middleware
 	authMiddleware := middleware.NewAuthMiddleware(authService)
-	// 1. Ensure the quiz controller is initialized in main.go
-	// 1. Initialize the Quiz Service with the DB pool handle
+
+	// Initialize quiz and application services
 	quizService := service.NewQuizService(db)
 	appService := service.NewApplicationService(db)
 
 	quizController := controller.NewQuizController(quizService)
-	appController := controller.NewApplicationController(appService)
+	appController := controller.NewApplicationController(appService, cvService)
 
-	// 2. Update the router creation call to pass it in
+	savedJobController := controller.NewSavedJobController(db)
+	adminController := controller.NewAdminController(
+		service.NewAdminService(db),
+	)
+
+	// Create router
 	handler := router.NewRouter(
 		authController,
 		jobController,
@@ -112,16 +119,19 @@ func main() {
 		appController,
 		sandboxController,
 		intelligenceController,
+		savedJobController,
+		adminController,
 		authMiddleware,
 	)
 
 	// Wrap handler with logging and CORS middleware
 	handler = middleware.RequestLogger(handler)
 	corsHandler := middleware.CORSMiddleware(handler)
-   
+
 	// Start server
 	serverAddr := ":5000"
 	log.Printf("Server starting on %s", serverAddr)
+
 	if err := http.ListenAndServe(serverAddr, corsHandler); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

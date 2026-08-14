@@ -250,3 +250,11 @@ FROM quiz_attempts
 WHERE completed_at BETWEEN $1 AND $2
 GROUP BY DATE(completed_at)
 ORDER BY date;
+
+-- name: GetUserQuizAnswers :many
+SELECT 
+    qa.*
+FROM quiz_answers qa
+JOIN quiz_attempts qat ON qa.quiz_attempt_id = qat.id
+WHERE qat.user_id = $1
+ORDER BY qa.created_at DESC;

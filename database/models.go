@@ -472,6 +472,17 @@ type AdminAuditTrail struct {
 	CreatedAt        pgtype.Timestamp
 }
 
+type AiSummary struct {
+	ID         pgtype.UUID
+	UserID     uuid.UUID
+	Summary    []byte
+	Strengths  pgtype.Text
+	Weaknesses pgtype.Text
+	Model      pgtype.Text
+	CreatedAt  pgtype.Timestamp
+	CvVersion  pgtype.Int4
+}
+
 type AuditExport struct {
 	ID              pgtype.UUID
 	ExportedBy      uuid.UUID
@@ -521,6 +532,19 @@ type CvApplicationUsage struct {
 	UsedAt        pgtype.Timestamp
 }
 
+type CvSignal struct {
+	ID                  pgtype.UUID
+	UserID              pgtype.UUID
+	ClaimedSkills       []byte
+	ExperienceLevel     pgtype.Text
+	ProjectsListed      pgtype.Int4
+	Credibility         pgtype.Text
+	AlignmentWithGithub pgtype.Text
+	RawSummary          pgtype.Text
+	CreatedAt           pgtype.Timestamp
+	UpdatedAt           pgtype.Timestamp
+}
+
 type CvVersion struct {
 	ID             pgtype.UUID
 	UserID         pgtype.UUID
@@ -534,6 +558,17 @@ type CvVersion struct {
 	UploadedFromIp *netip.Addr
 	ApplicationID  uuid.UUID
 	CreatedAt      pgtype.Timestamp
+	UpdatedAt      pgtype.Timestamp
+}
+
+type GithubSnapshot struct {
+	ID          pgtype.UUID
+	UserID      uuid.UUID
+	PublicRepos pgtype.Int4
+	Followers   pgtype.Int4
+	Following   pgtype.Int4
+	RawData     []byte
+	FetchedAt   pgtype.Timestamp
 }
 
 type Job struct {
@@ -704,6 +739,19 @@ type QuizResult struct {
 	CreatedAt                  pgtype.Timestamp
 }
 
+type RepositoryAnalysis struct {
+	ID         pgtype.UUID
+	UserID     uuid.UUID
+	RepoName   string
+	Language   pgtype.Text
+	Score      pgtype.Int4
+	HasReadme  pgtype.Bool
+	Stars      pgtype.Int4
+	Forks      pgtype.Int4
+	Signals    []byte
+	AnalyzedAt pgtype.Timestamp
+}
+
 type SandboxTemplate struct {
 	ID           pgtype.UUID
 	Language     string
@@ -772,4 +820,18 @@ type User struct {
 	TwitterUsername      pgtype.Text
 	TopLanguages         []string
 	ContributionCount    pgtype.Int4
+}
+
+type UserSkillProfile struct {
+	ID            pgtype.UUID
+	UserID        uuid.UUID
+	BackendScore  pgtype.Int4
+	FrontendScore pgtype.Int4
+	DevopsScore   pgtype.Int4
+	DatabaseScore pgtype.Int4
+	BackendLevel  pgtype.Text
+	FrontendLevel pgtype.Text
+	DevopsLevel   pgtype.Text
+	OverallScore  pgtype.Int4
+	GeneratedAt   pgtype.Timestamp
 }

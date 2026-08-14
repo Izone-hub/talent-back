@@ -4,18 +4,20 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/service"
+	"github.com/google/uuid"
 )
 
 type ApplicationController struct {
 	appService *service.ApplicationService
+	cvService  *service.CvService
 }
 
-func NewApplicationController(appService *service.ApplicationService) *ApplicationController {
+func NewApplicationController(appService *service.ApplicationService, cvService *service.CvService) *ApplicationController {
 	return &ApplicationController{
 		appService: appService,
+		cvService:  cvService,
 	}
 }
 
@@ -37,6 +39,10 @@ func (c *ApplicationController) ApplyForJob(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	if cv, err := c.cvService.GetCurrentCV(r.Context(), claims.UserID); err == nil {
+		go triggerCVAnalysis(cv.FilePath, cv.FileName, claims.GithubUsername, cv.Version)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -95,6 +101,23 @@ func (c *ApplicationController) GetApplicationDetail(w http.ResponseWriter, r *h
 	}
 
 	writeJSON(w, http.StatusOK, app)
+}
+
+func (c *ApplicationController) GetApplicationInformation(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	appID, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid application ID")
+		return
+	}
+
+	info, err := c.appService.GetApplicationInformation(r.Context(), appID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (c *ApplicationController) StartReview(w http.ResponseWriter, r *http.Request) {

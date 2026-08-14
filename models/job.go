@@ -91,6 +91,17 @@ type Job struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 	Tags      []Tag     `json:"tags,omitempty" db:"-"`
+
+	// UserApplication contains application info if the current user has applied
+	UserApplication *JobUserApplication `json:"user_application,omitempty" db:"-"`
+}
+
+// JobUserApplication holds the user's application status for a job
+type JobUserApplication struct {
+	Applied       bool       `json:"applied"`
+	ApplicationID *uuid.UUID `json:"application_id,omitempty"`
+	Status        *string    `json:"status,omitempty"`
+	SubmittedAt   *time.Time `json:"submitted_at,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -182,32 +193,33 @@ func (r *UpdateJobRequest) Validate() error {
 
 // JobResponse is the clean API response sent to clients.
 type JobResponse struct {
-	ID                uuid.UUID          `json:"id"`
-	Title             string             `json:"title"`
-	Company           string             `json:"company"`
-	CompanyLogo       *string            `json:"company_logo,omitempty"`
-	CompanyWebsite    *string            `json:"company_website,omitempty"`
-	CompanyLocation   *string            `json:"company_location,omitempty"`
-	Description       string             `json:"description"`
-	Requirements      string             `json:"requirements"`
-	Responsibilities  *string            `json:"responsibilities,omitempty"`
-	Benefits          *string            `json:"benefits,omitempty"`
-	JobType           JobType            `json:"job_type"`
-	ExperienceLevel   JobExperienceLevel `json:"experience_level"`
-	Location          *string            `json:"location,omitempty"`
-	RemotePossible    bool               `json:"remote_possible"`
-	SalaryMin         *int               `json:"salary_min,omitempty"`
-	SalaryMax         *int               `json:"salary_max,omitempty"`
-	SalaryCurrency    string             `json:"salary_currency"`
-	Status            JobStatus          `json:"status"`
-	PublishedAt       *time.Time         `json:"published_at,omitempty"`
-	ClosedAt          *time.Time         `json:"closed_at,omitempty"`
-	ExpiresAt         *time.Time         `json:"expires_at,omitempty"`
-	ViewsCount        int                `json:"views_count"`
-	ApplicationsCount int                `json:"applications_count"`
-	CreatedAt         time.Time          `json:"created_at"`
-	UpdatedAt         time.Time          `json:"updated_at"`
-	Tags              []Tag              `json:"tags,omitempty"`
+	ID                uuid.UUID           `json:"id"`
+	Title             string              `json:"title"`
+	Company           string              `json:"company"`
+	CompanyLogo       *string             `json:"company_logo,omitempty"`
+	CompanyWebsite    *string             `json:"company_website,omitempty"`
+	CompanyLocation   *string             `json:"company_location,omitempty"`
+	Description       string              `json:"description"`
+	Requirements      string              `json:"requirements"`
+	Responsibilities  *string             `json:"responsibilities,omitempty"`
+	Benefits          *string             `json:"benefits,omitempty"`
+	JobType           JobType             `json:"job_type"`
+	ExperienceLevel   JobExperienceLevel  `json:"experience_level"`
+	Location          *string             `json:"location,omitempty"`
+	RemotePossible    bool                `json:"remote_possible"`
+	SalaryMin         *int                `json:"salary_min,omitempty"`
+	SalaryMax         *int                `json:"salary_max,omitempty"`
+	SalaryCurrency    string              `json:"salary_currency"`
+	Status            JobStatus           `json:"status"`
+	PublishedAt       *time.Time          `json:"published_at,omitempty"`
+	ClosedAt          *time.Time          `json:"closed_at,omitempty"`
+	ExpiresAt         *time.Time          `json:"expires_at,omitempty"`
+	ViewsCount        int                 `json:"views_count"`
+	ApplicationsCount int                 `json:"applications_count"`
+	CreatedAt         time.Time           `json:"created_at"`
+	UpdatedAt         time.Time           `json:"updated_at"`
+	Tags              []Tag               `json:"tags,omitempty"`
+	UserApplication   *JobUserApplication `json:"user_application,omitempty"`
 }
 
 // JobListResponse wraps a paginated list of jobs.
@@ -247,5 +259,6 @@ func (j *Job) ToResponse() JobResponse {
 		CreatedAt:         j.CreatedAt,
 		UpdatedAt:         j.UpdatedAt,
 		Tags:              j.Tags,
+		UserApplication:   j.UserApplication,
 	}
 }

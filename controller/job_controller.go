@@ -107,7 +107,12 @@ func (c *JobController) CreateJob(w http.ResponseWriter, r *http.Request) {
 func (c *JobController) ListPublishedJobs(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePagination(r)
 
-	jobs, err := c.jobService.ListPublishedJobs(r.Context(), limit, offset)
+	var userIDPtr *uuid.UUID
+	if userID, ok := getUserID(r); ok {
+		userIDPtr = &userID
+	}
+
+	jobs, err := c.jobService.ListPublishedJobs(r.Context(), userIDPtr, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

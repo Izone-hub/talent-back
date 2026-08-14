@@ -319,7 +319,7 @@ def run_tests():
         try:
             fn = globals().get(test["func"])
             if fn is None:
-                print(f"Test {i}: FAIL - function %s not found" %% test["func"])
+                print(f"Test {i}: FAIL - function %%s not found" %% test["func"])
                 sys.exit(1)
             result = fn(*test["args"])
             expected = test["expected"]

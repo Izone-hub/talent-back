@@ -118,16 +118,29 @@ func (s *JobService) GetPublishedJob(ctx context.Context, jobID uuid.UUID) (*mod
 }
 
 // ListPublishedJobs returns a paginated list of published jobs for the public
-// job board.
-func (s *JobService) ListPublishedJobs(ctx context.Context, limit, offset int) ([]models.Job, error) {
-	dbJobs, err := s.queries.ListPublishedJobs(ctx, database.ListPublishedJobsParams{
-		Limit:  int32(limit),
-		Offset: int32(offset),
-	})
+// job board. If userID is provided, it includes the user's application status for each job.
+func (s *JobService) ListPublishedJobs(ctx context.Context, userID *uuid.UUID, limit, offset int) ([]models.Job, error) {
+	var dbJobs []database.ListAllPublishedJobsRow
+	var err error
+
+	if userID != nil {
+		dbJobs, err = s.queries.ListAllPublishedJobs(ctx, database.ListAllPublishedJobsParams{
+			Limit:  int32(limit),
+			Offset: int32(offset),
+			UserID: uuidToPgUUID(*userID),
+		})
+	} else {
+		dbJobs, err = s.queries.ListAllPublishedJobs(ctx, database.ListAllPublishedJobsParams{
+			Limit:  int32(limit),
+			Offset: int32(offset),
+			UserID: pgtype.UUID{Valid: false},
+		})
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to list published jobs: %w", err)
 	}
-	jobs := dbJobsToModels(dbJobs)
+	jobs := listPublishedJobsRowsToModels(dbJobs)
 	return s.enrichJobsWithTags(ctx, jobs)
 }
 
@@ -447,4 +460,61 @@ func pgNullCategoryToStrPtr(c database.NullTagCategory) *string {
 	}
 	s := string(c.TagCategory)
 	return &s
+}
+
+func listPublishedJobsRowsToModels(dbJobs []database.ListAllPublishedJobsRow) []models.Job {
+	jobs := make([]models.Job, 0, len(dbJobs))
+	for _, j := range dbJobs {
+		var id uuid.UUID
+		if j.ID.Valid {
+			id, _ = uuid.FromBytes(j.ID.Bytes[:])
+		}
+		var postedBy uuid.UUID
+		if j.PostedBy.Valid {
+			postedBy, _ = uuid.FromBytes(j.PostedBy.Bytes[:])
+		}
+
+		job := models.Job{
+			ID:                id,
+			Title:             j.Title,
+			Company:           j.Company,
+			CompanyLogo:       pgTextToStrPtr(j.CompanyLogo),
+			CompanyWebsite:    pgTextToStrPtr(j.CompanyWebsite),
+			CompanyLocation:   pgTextToStrPtr(j.CompanyLocation),
+			Description:       j.Description,
+			Requirements:      j.Requirements,
+			Responsibilities:  pgTextToStrPtr(j.Responsibilities),
+			Benefits:          pgTextToStrPtr(j.Benefits),
+			JobType:           models.JobType(j.JobType),
+			ExperienceLevel:   models.JobExperienceLevel(j.ExperienceLevel),
+			Location:          pgTextToStrPtr(j.Location),
+			RemotePossible:    j.RemotePossible.Bool,
+			SalaryMin:         pgInt4ToIntPtr(j.SalaryMin),
+			SalaryMax:         pgInt4ToIntPtr(j.SalaryMax),
+			SalaryCurrency:    pgTextToString(j.SalaryCurrency),
+			Status:            models.JobStatus(j.Status),
+			PublishedAt:       pgTimestampToTimePtr(j.PublishedAt),
+			ClosedAt:          pgTimestampToTimePtr(j.ClosedAt),
+			ArchivedAt:        pgTimestampToTimePtr(j.ArchivedAt),
+			ExpiresAt:         pgTimestampToTimePtr(j.ExpiresAt),
+			PostedBy:          postedBy,
+			ViewsCount:        int(j.ViewsCount.Int32),
+			ApplicationsCount: int(j.ApplicationsCount.Int32),
+			CreatedAt:         pgTimestampToTime(j.CreatedAt),
+			UpdatedAt:         pgTimestampToTime(j.UpdatedAt),
+		}
+
+		if j.ApplicationStatus == "applied" {
+			job.UserApplication = &models.JobUserApplication{
+				Applied: true,
+			}
+		} else if j.ApplicationStatus == "not_applied" {
+			job.UserApplication = &models.JobUserApplication{
+				Applied: false,
+			}
+		}
+
+		jobs = append(jobs, job)
+	}
+	return jobs
 }

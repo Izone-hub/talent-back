@@ -10,16 +10,16 @@ import (
 type ApplicationStatus string
 
 const (
-	ApplicationStatusDraft           ApplicationStatus = "draft"
-	ApplicationStatusSubmitted      ApplicationStatus = "submitted"
-	ApplicationStatusQuizStarted    ApplicationStatus = "quiz_started"
-	ApplicationStatusQuizCompleted  ApplicationStatus = "quiz_completed"
-	ApplicationStatusUnderReview    ApplicationStatus = "under_review"
-	ApplicationStatusShortlisted    ApplicationStatus = "shortlisted"
-	ApplicationStatusInterviewed    ApplicationStatus = "interviewed"
-	ApplicationStatusRejected       ApplicationStatus = "rejected"
-	ApplicationStatusAccepted       ApplicationStatus = "accepted"
-	ApplicationStatusWithdrawn      ApplicationStatus = "withdrawn"
+	ApplicationStatusDraft         ApplicationStatus = "draft"
+	ApplicationStatusSubmitted     ApplicationStatus = "submitted"
+	ApplicationStatusQuizStarted   ApplicationStatus = "quiz_started"
+	ApplicationStatusQuizCompleted ApplicationStatus = "quiz_completed"
+	ApplicationStatusUnderReview   ApplicationStatus = "under_review"
+	ApplicationStatusShortlisted   ApplicationStatus = "shortlisted"
+	ApplicationStatusInterviewed   ApplicationStatus = "interviewed"
+	ApplicationStatusRejected      ApplicationStatus = "rejected"
+	ApplicationStatusAccepted      ApplicationStatus = "accepted"
+	ApplicationStatusWithdrawn     ApplicationStatus = "withdrawn"
 )
 
 type JobApplication struct {
@@ -27,10 +27,10 @@ type JobApplication struct {
 	JobID  uuid.UUID `json:"job_id" db:"job_id"`
 	UserID uuid.UUID `json:"user_id" db:"user_id"`
 
-	GithubUsername   string  `json:"github_username" db:"github_username"`
-	GithubID         int64   `json:"github_id" db:"github_id"`
-	ApplicantEmail   *string `json:"applicant_email,omitempty" db:"applicant_email"`
-	ApplicantName    *string `json:"applicant_name,omitempty" db:"applicant_name"`
+	GithubUsername     string  `json:"github_username" db:"github_username"`
+	GithubID           int64   `json:"github_id" db:"github_id"`
+	ApplicantEmail     *string `json:"applicant_email,omitempty" db:"applicant_email"`
+	ApplicantName      *string `json:"applicant_name,omitempty" db:"applicant_name"`
 	ApplicantAvatarURL *string `json:"applicant_avatar_url,omitempty" db:"applicant_avatar_url"`
 
 	CoverLetter            *string    `json:"cover_letter,omitempty" db:"cover_letter"`
@@ -49,10 +49,10 @@ type JobApplication struct {
 	EmployerFeedback *string    `json:"employer_feedback,omitempty" db:"employer_feedback"`
 	RejectionReason  *string    `json:"rejection_reason,omitempty" db:"rejection_reason"`
 
-	QuizID           *uuid.UUID  `json:"quiz_id,omitempty" db:"quiz_id"`
-	QuizScore        *int        `json:"quiz_score,omitempty" db:"quiz_score"`
-	QuizCompletedAt  *time.Time  `json:"quiz_completed_at,omitempty" db:"quiz_completed_at"`
-	QuizPassed       *bool       `json:"quiz_passed,omitempty" db:"quiz_passed"`
+	QuizID          *uuid.UUID `json:"quiz_id,omitempty" db:"quiz_id"`
+	QuizScore       *int       `json:"quiz_score,omitempty" db:"quiz_score"`
+	QuizCompletedAt *time.Time `json:"quiz_completed_at,omitempty" db:"quiz_completed_at"`
+	QuizPassed      *bool      `json:"quiz_passed,omitempty" db:"quiz_passed"`
 
 	CanViewAISummary bool `json:"can_view_ai_summary" db:"can_view_ai_summary"`
 
