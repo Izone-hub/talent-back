@@ -49,14 +49,6 @@ func V1Routes(
 	mux.HandleFunc("POST /api/v1/jobs/{id}/apply", authMiddleware.Authenticate(appController.ApplyForJob))
 
 	// -----------------------------------------------------------------------
-	// Saved Jobs routes — Protected
-	// -----------------------------------------------------------------------
-	mux.HandleFunc("GET /api/v1/jobs/saved", authMiddleware.Authenticate(savedJobController.ListSavedJobs))
-	mux.HandleFunc("POST /api/v1/jobs/{id}/save", authMiddleware.Authenticate(savedJobController.SaveJob))
-	mux.HandleFunc("DELETE /api/v1/jobs/{id}/save", authMiddleware.Authenticate(savedJobController.UnsaveJob))
-	mux.HandleFunc("GET /api/v1/jobs/{id}/saved", authMiddleware.Authenticate(savedJobController.IsJobSaved))
-
-	// -----------------------------------------------------------------------
 	// Application routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/applications/my", authMiddleware.Authenticate(appController.GetMyApplications))
@@ -150,6 +142,8 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Intelligence routes
 	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /api/v1/intelligence/{id}/summary", authMiddleware.Authenticate(intelligenceController.GetLatestUserSummary))
+	mux.HandleFunc("GET /api/v1/intelligence/user/{id}/summary", authMiddleware.Authenticate(intelligenceController.GetLatestUserSummary))
 	mux.HandleFunc("POST /api/v1/intelligence/github/{id}/fetch", authMiddleware.Authenticate(intelligenceController.FetchGitHubSnapshot))
 	mux.HandleFunc("POST /api/v1/analyze-cv", intelligenceController.AnalyzeCV)
 
