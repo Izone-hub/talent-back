@@ -146,6 +146,7 @@ func V1Routes(
 	mux.HandleFunc("GET /api/v1/intelligence/user/{id}/summary", authMiddleware.Authenticate(intelligenceController.GetLatestUserSummary))
 	mux.HandleFunc("POST /api/v1/intelligence/github/{id}/fetch", authMiddleware.Authenticate(intelligenceController.FetchGitHubSnapshot))
 	mux.HandleFunc("POST /api/v1/analyze-cv", intelligenceController.AnalyzeCV)
+	mux.HandleFunc("POST /api/v1/generate-job-description", authMiddleware.Authenticate(intelligenceController.GenerateJobDescriptionPublic))
 
 	// -----------------------------------------------------------------------
 	// User review dashboard routes

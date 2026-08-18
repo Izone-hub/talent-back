@@ -383,6 +383,47 @@ func (c *IntelligenceController) GenerateJobDescription(w http.ResponseWriter, r
 	w.Write(body)
 }
 
+func (c *IntelligenceController) GenerateJobDescriptionPublic(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Prompt      string `json:"prompt"`
+		CompanyName string `json:"company_name,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	if req.Prompt == "" {
+		writeError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+
+	payload, _ := json.Marshal(req)
+
+	analyzerURL := os.Getenv("ANALYZER_URL")
+	if analyzerURL == "" {
+		analyzerURL = "http://localhost:8000"
+	}
+	url := strings.TrimSuffix(analyzerURL, "/analyze-cv") + "/generate-job-description"
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach AI service: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read AI response")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(body)
+}
+
 func extractStrengthsWeaknesses(response json.RawMessage) (string, string) {
 	var data struct {
 		Checks []struct {
