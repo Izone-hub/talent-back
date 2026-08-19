@@ -147,6 +147,7 @@ func V1Routes(
 	mux.HandleFunc("POST /api/v1/intelligence/github/{id}/fetch", authMiddleware.Authenticate(intelligenceController.FetchGitHubSnapshot))
 	mux.HandleFunc("POST /api/v1/analyze-cv", intelligenceController.AnalyzeCV)
 	mux.HandleFunc("POST /api/v1/generate-job-description", authMiddleware.Authenticate(intelligenceController.GenerateJobDescriptionPublic))
+	mux.HandleFunc("POST /api/v1/generate-questions", authMiddleware.Authenticate(intelligenceController.GenerateQuestionsPublic))
 
 	// -----------------------------------------------------------------------
 	// User review dashboard routes
@@ -160,6 +161,11 @@ func V1Routes(
 	mux.HandleFunc("POST /api/v1/admin/generate-job-description",
 		authMiddleware.Authenticate(
 			authMiddleware.RequireAdmin(intelligenceController.GenerateJobDescription),
+		),
+	)
+	mux.HandleFunc("POST /api/v1/admin/generate-questions",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(intelligenceController.GenerateQuestions),
 		),
 	)
 	mux.HandleFunc("GET /api/v1/admin/dashboard",
