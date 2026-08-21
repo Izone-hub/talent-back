@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
@@ -714,30 +715,66 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, questionID, la
 		lang = dbLang
 	}
 
-	// Filter to only visible test cases and convert to sandbox format {func, args, expected}
+	// Use AST-based detection for function names
+	sandbox := &SandboxService{}
+	parseReq := models.ParseRequest{Language: lang, Code: code}
+	parseResp, parseErr := sandbox.ParseCode(ctx, parseReq)
+
+	var detectedFunc string
+	if parseErr == nil && len(parseResp.Functions) > 0 {
+		detectedFunc = parseResp.Functions[0].Name
+	} else {
+		detectedFunc = detectFunctionName(code, lang)
+	}
+
+	// Filter to only visible test cases and convert to sandbox format
 	var allTests []map[string]interface{}
 	if err := json.Unmarshal(testCases, &allTests); err != nil {
 		return nil, fmt.Errorf("invalid test cases: %w", err)
 	}
 
 	var sandboxTests []map[string]interface{}
-	for _, tc := range allTests {
+	for i, tc := range allTests {
 		if hidden, _ := tc["hidden"].(bool); hidden {
 			continue
 		}
 		if hidden, _ := tc["is_hidden"].(bool); hidden {
 			continue
 		}
-		// Convert {input, expected_output} to {func, args, expected}
+		// Convert test case formats
 		fn, _ := tc["func"].(string)
 		if fn == "" {
-			fn = "solution"
+			fn = detectedFunc
+		} else {
+			// Map the expected function name to the user's function name
+			fn = detectedFunc
 		}
 		args := tc["args"]
 		if args == nil {
 			if input, ok := tc["input"]; ok {
 				args = input
 			}
+		}
+		// Validate args: must be an array (list of arguments)
+		if args == nil {
+			log.Printf("RunQuizCode: skipping test case %d - no args provided", i)
+			continue
+		}
+		if argsStr, ok := args.(string); ok {
+			// The entire string is the argument value — parse as JSON and wrap as
+			// a SINGLE argument so that e.g. "[1,2,3,4]" becomes [[1,2,3,4]]
+			// (one argument: the array) rather than [1,2,3,4] (four arguments).
+			var parsed interface{}
+			if err := json.Unmarshal([]byte(argsStr), &parsed); err == nil {
+				args = []interface{}{parsed}
+			} else {
+				// Single string value — wrap in array as a single argument
+				args = []interface{}{argsStr}
+			}
+		}
+		if _, ok := args.([]interface{}); !ok {
+			log.Printf("RunQuizCode: skipping test case %d - args is not an array: %v", i, args)
+			continue
 		}
 		expected := tc["expected"]
 		if expected == nil {
@@ -755,8 +792,72 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, questionID, la
 
 	sandboxTestsJSON, _ := json.Marshal(sandboxTests)
 
-	// Execute code via sandbox using function execution type
-	sandbox := &SandboxService{}
+	// Detect if test cases are simple input/output (no func/args) — use standard execution
+	hasFuncField := false
+	for _, tc := range allTests {
+		if _, ok := tc["func"]; ok {
+			hasFuncField = true
+			break
+		}
+	}
+
+	codeDefinesFunc := hasFunctionDefinition(code, lang)
+	useFunctionMode := hasFuncField || codeDefinesFunc
+
+	if !useFunctionMode && len(sandboxTests) > 0 {
+		// Simple output-based question: run code with stdin, compare stdout to expected
+		inputStr, _ := json.Marshal(allTests[0]["input"])
+		var stdinVal string
+		if inputStr != nil && string(inputStr) != "null" {
+			stdinVal = strings.Trim(string(inputStr), "\"")
+		}
+
+		req := models.ExecuteRequest{
+			Language:    lang,
+			Code:        code,
+			Type:        models.ExecutionTypeStandard,
+			Stdin:       stdinVal,
+			TimeLimit:   execTimeLimit,
+			MemoryLimit: memLimit,
+		}
+		resp, err := sandbox.Execute(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("sandbox execution failed: %w", err)
+		}
+
+		// Compare stdout to expected output
+		if resp.ExitCode == 0 && resp.Stdout != "" {
+			expectedOut, _ := allTests[0]["expected_output"].(string)
+			actualOut := strings.TrimSpace(resp.Stdout)
+			expectedOut = strings.TrimSpace(expectedOut)
+			passed := actualOut == expectedOut
+			resp.Passed = &passed
+		} else {
+			passed := false
+			resp.Passed = &passed
+		}
+
+		isCorrect := resp.Passed != nil && *resp.Passed
+		_, upsertErr := s.pool.Exec(ctx, `
+			INSERT INTO quiz_answers (quiz_attempt_id, question_id, user_answer, is_correct, code_output, execution_time_ms, save_count, last_saved_at)
+			VALUES ($1, $2, $3, $4, $5, $6, 1, NOW())
+			ON CONFLICT (quiz_attempt_id, question_id) DO UPDATE SET
+				user_answer = EXCLUDED.user_answer,
+				is_correct = EXCLUDED.is_correct,
+				code_output = EXCLUDED.code_output,
+				execution_time_ms = EXCLUDED.execution_time_ms,
+				save_count = quiz_answers.save_count + 1,
+				last_saved_at = NOW(),
+				updated_at = NOW()
+		`, attemptID, questionUUID, code, isCorrect, resp.Stdout, resp.TimeMs)
+		if upsertErr != nil {
+			log.Printf("RunQuizCode: failed to save quiz_answer: %v", upsertErr)
+		}
+
+		return resp, nil
+	}
+
+	// Function-based question: use test harness
 	req := models.ExecuteRequest{
 		Language:    lang,
 		Code:        code,
@@ -892,4 +993,132 @@ func timestampPtr(v pgtype.Timestamp) *time.Time {
 	}
 	t := v.Time
 	return &t
+}
+
+func hasFunctionDefinition(code, lang string) bool {
+	code = strings.TrimSpace(code)
+	switch strings.ToLower(lang) {
+	case "javascript":
+		return strings.Contains(code, "function ") ||
+			strings.Contains(code, "=>") ||
+			strings.Contains(code, "const solution") ||
+			strings.Contains(code, "let solution") ||
+			strings.Contains(code, "var solution")
+	case "python":
+		return strings.Contains(code, "def ")
+	case "java":
+		return strings.Contains(code, "public static") || strings.Contains(code, "class ")
+	case "cpp", "c++":
+		return strings.Contains(code, "int solution") || strings.Contains(code, "void solution") || strings.Contains(code, "string solution")
+	case "go":
+		return strings.Contains(code, "func ")
+	default:
+		return strings.Contains(code, "function ") || strings.Contains(code, "def ") || strings.Contains(code, "func ")
+	}
+}
+
+func detectFunctionName(code, lang string) string {
+	code = strings.TrimSpace(code)
+	switch strings.ToLower(lang) {
+	case "python":
+		for _, line := range strings.Split(code, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "def ") {
+				rest := line[4:]
+				parenIdx := strings.Index(rest, "(")
+				if parenIdx > 0 {
+					return strings.TrimSpace(rest[:parenIdx])
+				}
+			}
+		}
+	case "javascript":
+		for _, line := range strings.Split(code, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "function ") {
+				rest := line[9:]
+				parenIdx := strings.Index(rest, "(")
+				if parenIdx > 0 {
+					return strings.TrimSpace(rest[:parenIdx])
+				}
+			}
+			if strings.HasPrefix(line, "const ") || strings.HasPrefix(line, "let ") || strings.HasPrefix(line, "var ") {
+				equalsIdx := strings.Index(line, "=")
+				if equalsIdx > 0 {
+					name := strings.TrimSpace(line[6:equalsIdx])
+					if name != "" {
+						return name
+					}
+				}
+			}
+		}
+	case "go":
+		for _, line := range strings.Split(code, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "func ") {
+				rest := line[5:]
+				if strings.HasPrefix(rest, "(") {
+					closeIdx := strings.Index(rest, ")")
+					if closeIdx > 0 {
+						rest = strings.TrimSpace(rest[closeIdx+1:])
+					}
+				}
+				parenIdx := strings.Index(rest, "(")
+				if parenIdx > 0 {
+					name := strings.TrimSpace(rest[:parenIdx])
+					if name != "" && name != "main" && name != "init" {
+						return name
+					}
+				}
+			}
+		}
+	case "java":
+		for _, line := range strings.Split(code, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.Contains(line, "public static") || strings.Contains(line, "static public") {
+				parenIdx := strings.Index(line, "(")
+				if parenIdx > 0 {
+					before := line[:parenIdx]
+					parts := strings.Fields(before)
+					if len(parts) > 0 {
+						name := parts[len(parts)-1]
+						if name != "" {
+							return name
+						}
+					}
+				}
+			}
+		}
+	case "cpp", "c++":
+		for _, line := range strings.Split(code, "\n") {
+			line = strings.TrimSpace(line)
+			parenIdx := strings.Index(line, "(")
+			if parenIdx > 0 {
+				before := line[:parenIdx]
+				parts := strings.Fields(before)
+				if len(parts) >= 2 {
+					name := parts[len(parts)-1]
+					if name != "main" && name != "if" && name != "for" && name != "while" {
+						return name
+					}
+				}
+			}
+		}
+	}
+
+	for _, line := range strings.Split(code, "\n") {
+		line = strings.TrimSpace(line)
+		parenIdx := strings.Index(line, "(")
+		if parenIdx > 0 {
+			before := line[:parenIdx]
+			parts := strings.Fields(before)
+			if len(parts) > 0 {
+				name := parts[len(parts)-1]
+				if name != "" && name != "if" && name != "for" && name != "while" && name != "switch" {
+					return name
+				}
+			}
+		}
+	}
+
+	return "solution"
 }

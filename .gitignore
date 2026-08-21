@@ -23,3 +23,5 @@ cache/
 Thumbs.db
 uploads/*
 history/*
+server
+*.log
