@@ -127,3 +127,32 @@ func (r *UpdateQuestionRequest) Validate() error {
 	// Basic validation logic
 	return nil
 }
+
+// ValidateQuestionRequest is the payload for validating a coding question.
+type ValidateQuestionRequest struct {
+	Code string `json:"code" validate:"required"`
+}
+
+// TestCaseResult holds the result of validating a single test case.
+type TestCaseResult struct {
+	Index          int         `json:"index"`
+	Input          interface{} `json:"input"`
+	ExpectedOutput string      `json:"expected_output"`
+	ActualOutput   string      `json:"actual_output"`
+	Passed         bool        `json:"passed"`
+	Error          string      `json:"error,omitempty"`
+	IsHidden       bool        `json:"is_hidden"`
+	TimeMs         int64       `json:"time_ms"`
+}
+
+// ValidateQuestionResponse is the response for the validate endpoint.
+type ValidateQuestionResponse struct {
+	QuestionID  string           `json:"question_id"`
+	Language    string           `json:"language"`
+	TotalPassed int              `json:"total_passed"`
+	TotalFailed int              `json:"total_failed"`
+	TotalCases  int              `json:"total_cases"`
+	AllPassed   bool             `json:"all_passed"`
+	TestResults []TestCaseResult `json:"test_results"`
+	Error       string           `json:"error,omitempty"`
+}

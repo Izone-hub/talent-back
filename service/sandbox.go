@@ -120,6 +120,149 @@ func (s *SandboxService) Execute(ctx context.Context, req models.ExecuteRequest)
 	}
 }
 
+func (s *SandboxService) ParseCode(ctx context.Context, req models.ParseRequest) (*models.ParseResponse, error) {
+	switch strings.ToLower(req.Language) {
+	case "python", "py":
+		return s.parsePython(ctx, req.Code)
+	case "javascript", "js", "node":
+		return s.parseJavaScript(ctx, req.Code)
+	default:
+		return &models.ParseResponse{Error: fmt.Sprintf("parsing not supported for language: %s", req.Language)}, nil
+	}
+}
+
+func (s *SandboxService) parsePython(ctx context.Context, code string) (*models.ParseResponse, error) {
+	parserScript := `import ast
+import json
+import sys
+
+code = sys.stdin.read()
+tree = ast.parse(code)
+
+functions = []
+for node in ast.walk(tree):
+    if isinstance(node, ast.FunctionDef):
+        args = [arg.arg for arg in node.args.args]
+        functions.append({
+            "name": node.name,
+            "args": args,
+            "startLine": node.lineno,
+            "endLine": node.end_lineno or node.lineno
+        })
+
+print(json.dumps({"functions": functions}))
+`
+
+	workDir, err := os.MkdirTemp("", "sandbox-parse-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create work dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	parserFile := filepath.Join(workDir, "parser.py")
+	if err := os.WriteFile(parserFile, []byte(parserScript), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write parser: %w", err)
+	}
+
+	dockerArgs := []string{
+		"run", "--rm", "--network", "none",
+		"--memory", "128m", "--cpus", "0.5",
+		"--read-only", "--tmpfs", "/tmp:rw,exec,nosuid,size=64m",
+		"-v", workDir+":/code:ro", "-w", "/code",
+		"--security-opt", "no-new-privileges:true",
+		"--cap-drop", "ALL",
+		"python:3.12-slim", "python", "/code/parser.py",
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Stdin = strings.NewReader(code)
+
+	if err := cmd.Run(); err != nil {
+		return &models.ParseResponse{Error: stderr.String()}, nil
+	}
+
+	var result models.ParseResponse
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		return &models.ParseResponse{Error: "failed to parse output: " + err.Error()}, nil
+	}
+	return &result, nil
+}
+
+func (s *SandboxService) parseJavaScript(ctx context.Context, code string) (*models.ParseResponse, error) {
+	parserScript := `const acorn = require('acorn');
+const code = require('fs').readFileSync('/code/input.js', 'utf8');
+
+try {
+    const ast = acorn.parse(code, { ecmaVersion: 2022, sourceType: 'module' });
+    const functions = [];
+    
+    for (const node of ast.body) {
+        if (node.type === 'FunctionDeclaration') {
+            functions.push({
+                name: node.id.name,
+                args: node.params.map(p => p.name),
+                startLine: node.loc.start.line,
+                endLine: node.loc.end.line
+            });
+        }
+    }
+    
+    console.log(JSON.stringify({ functions }));
+} catch (e) {
+    console.log(JSON.stringify({ functions: [], error: e.message }));
+}
+`
+
+	workDir, err := os.MkdirTemp("", "sandbox-parse-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create work dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	parserFile := filepath.Join(workDir, "parser.js")
+	if err := os.WriteFile(parserFile, []byte(parserScript), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write parser: %w", err)
+	}
+
+	inputFile := filepath.Join(workDir, "input.js")
+	if err := os.WriteFile(inputFile, []byte(code), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write input: %w", err)
+	}
+
+	packageJSON := filepath.Join(workDir, "package.json")
+	if err := os.WriteFile(packageJSON, []byte(`{"dependencies":{"acorn":"^8.11.0"}}`), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write package.json: %w", err)
+	}
+
+	dockerArgs := []string{
+		"run", "--rm", "--network", "none",
+		"--memory", "128m", "--cpus", "0.5",
+		"--read-only", "--tmpfs", "/tmp:rw,exec,nosuid,size=64m",
+		"-v", workDir+":/code", "-w", "/code",
+		"--security-opt", "no-new-privileges:true",
+		"--cap-drop", "ALL",
+		"node:22-slim", "sh", "-c", "npm install --silent 2>/dev/null && node /code/parser.js",
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return &models.ParseResponse{Error: stderr.String()}, nil
+	}
+
+	var result models.ParseResponse
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		return &models.ParseResponse{Error: "failed to parse output: " + err.Error()}, nil
+	}
+	return &result, nil
+}
+
 func (s *SandboxService) executeStandard(ctx context.Context, cfg langConfig, req models.ExecuteRequest) (*models.ExecuteResponse, error) {
 	workDir, err := os.MkdirTemp("", "sandbox-*")
 	if err != nil {
@@ -162,6 +305,11 @@ func (s *SandboxService) executeFunction(ctx context.Context, cfg langConfig, re
 	if err := os.WriteFile(testFile, []byte(testHarness), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write test harness: %w", err)
 	}
+
+	// Always write test cases to a JSON file so harnesses can read from disk
+	// instead of embedding JSON in source code (avoids escaping issues)
+	testsJSONFile := filepath.Join(workDir, "tests.json")
+	_ = os.WriteFile(testsJSONFile, []byte(req.Stdin), 0644)
 
 	cmdArgs := replaceFile(cfg.RunCmd, "/code/test_runner"+cfg.Ext)
 	resp, dErr := s.runDocker(ctx, cfg.Image, workDir, cmdArgs, "", req.TimeLimit, req.MemoryLimit, cfg.Env...)
@@ -311,22 +459,121 @@ func (s *SandboxService) generateTestHarness(language, testCases string) (string
 func (s *SandboxService) pyTestHarness(testCases string) string {
 	return fmt.Sprintf(`import sys
 import json
+import re
+import inspect
 from solution import *
+
+INVALID_STRINGS = {'', '-', '--', '.', 'null', 'None', 'undefined', 'nan', 'inf', 'none', 'nan', 'infinity'}
+
+def is_invalid_string(val):
+    """Check if a string value is invalid / non-numeric placeholder."""
+    if not isinstance(val, str):
+        return False
+    return val.strip().lower() in INVALID_STRINGS
+
+def looks_like_json(val):
+    """Check if a string looks like a JSON array or object."""
+    if not isinstance(val, str):
+        return False
+    t = val.strip()
+    return (t.startswith('[') and t.endswith(']')) or (t.startswith('{') and t.endswith('}'))
+
+def is_numeric_string(val):
+    """Check if a string is a valid number (int or float)."""
+    if not isinstance(val, str):
+        return False
+    t = val.strip()
+    if not t or t in INVALID_STRINGS:
+        return False
+    # Match optional sign, digits, optional decimal, optional exponent
+    return bool(re.match(r'^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$', t))
+
+def auto_convert(val):
+    if isinstance(val, str):
+        val = val.strip()
+        if is_invalid_string(val):
+            return None
+        # Try parsing JSON (handles "[1,2,3]" -> [1,2,3] and "{}" -> {})
+        if looks_like_json(val):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list):
+                    return [auto_convert(x) for x in parsed]
+                return parsed
+            except (json.JSONDecodeError, ValueError):
+                # Try normalizing single quotes to double quotes
+                # (handles Python-style lists like ['a','b','c'])
+                try:
+                    normalized = val.replace("'", '"')
+                    parsed = json.loads(normalized)
+                    if isinstance(parsed, list):
+                        return [auto_convert(x) for x in parsed]
+                    return parsed
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        # Try numeric conversion
+        if is_numeric_string(val):
+            try:
+                return int(val)
+            except ValueError:
+                try:
+                    return float(val)
+                except ValueError:
+                    pass
+        return val
+    if isinstance(val, list):
+        return [auto_convert(x) for x in val]
+    if isinstance(val, dict):
+        return {k: auto_convert(v) for k, v in val.items()}
+    return val
 
 def run_tests():
     tests = json.loads(%s)
+    skipped = 0
     for i, test in enumerate(tests):
         try:
             fn = globals().get(test["func"])
             if fn is None:
-                print(f"Test {i}: FAIL - function %%s not found" %% test["func"])
+                print("Test %%d: FAIL - function %%s not found" %% (i, test["func"]))
                 sys.exit(1)
-            result = fn(*test["args"])
-            expected = test["expected"]
-            assert result == expected, f"Test {i}: got {result}, expected {expected}"
-            print(f"Test {i}: PASS")
+            sig = inspect.signature(fn)
+            param_count = len(sig.parameters)
+            raw_args = test["args"]
+            # Auto-convert the args (handles stringified lists, numbers, etc.)
+            if isinstance(raw_args, list):
+                # Check for invalid args BEFORE calling the function
+                for a in raw_args:
+                    if is_invalid_string(a):
+                        print("Test %%d: SKIP - invalid input %%s" %% (i, repr(a)))
+                        skipped += 1
+                        break
+                else:
+                    all_args = [auto_convert(a) for a in raw_args]
+                    args = all_args[:param_count]
+                    result = fn(*args)
+                    expected = auto_convert(test["expected"])
+                    strict = test.get("strict", False)
+                    if strict:
+                        match = result == expected
+                    else:
+                        # Relaxed: None and False/0/empty are not silently equivalent
+                        match = result == expected
+                    assert match, "Test %%d: got %%s, expected %%s" %% (i, result, expected)
+                    print("Test %%d: PASS" %% i)
+            else:
+                all_args = [auto_convert(raw_args)]
+                args = all_args[:param_count]
+                result = fn(*args)
+                expected = auto_convert(test["expected"])
+                strict = test.get("strict", False)
+                if strict:
+                    match = result == expected
+                else:
+                    match = result == expected
+                assert match, "Test %%d: got %%s, expected %%s" %% (i, result, expected)
+                print("Test %%d: PASS" %% i)
         except Exception as e:
-            print(f"Test {i}: FAIL - {e}")
+            print("Test %%d: FAIL - %%s" %% (i, e))
             sys.exit(1)
     print("ALL TESTS PASSED")
 
@@ -336,9 +583,75 @@ if __name__ == "__main__":
 }
 
 func (s *SandboxService) jsTestHarness(testCases string) string {
-	return fmt.Sprintf(`require('./solution.js');
+	return fmt.Sprintf(`const fs = require('fs');
+const vm = require('vm');
+const code = fs.readFileSync('/code/solution.js', 'utf8');
+vm.runInThisContext(code, { filename: 'solution.js' });
 
 const tests = %s;
+
+const INVALID_STRINGS = new Set(['', '-', '--', '.', 'null', 'undefined', 'nan', 'inf', 'none', 'infinity']);
+
+function isInvalidString(val) {
+    if (typeof val !== 'string') return false;
+    return INVALID_STRINGS.has(val.trim().toLowerCase());
+}
+
+function looksLikeJson(val) {
+    if (typeof val !== 'string') return false;
+    const t = val.trim();
+    return (t.startsWith('[') && t.endsWith(']')) || (t.startsWith('{') && t.endsWith('}'));
+}
+
+function isNumericString(val) {
+    if (typeof val !== 'string') return false;
+    const t = val.trim();
+    if (!t || INVALID_STRINGS.has(t.toLowerCase())) return false;
+    return /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t);
+}
+
+function autoConvert(val) {
+    if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (isInvalidString(val)) return null;
+        // Try parsing JSON (handles "[1,2,3]" -> [1,2,3] and "{}" -> {})
+        if (looksLikeJson(val)) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) return parsed.map(autoConvert);
+                return parsed;
+            } catch (e) {
+                // Try normalizing single quotes to double quotes
+                // (handles Python-style lists like ['a','b','c'])
+                try {
+                    const normalized = trimmed.replace(/'/g, '"');
+                    const parsed = JSON.parse(normalized);
+                    if (Array.isArray(parsed)) return parsed.map(autoConvert);
+                    return parsed;
+                } catch (e2) {
+                    // Not valid even after normalization
+                }
+            }
+        }
+        // Try numeric conversion
+        if (isNumericString(val)) {
+            const num = Number(trimmed);
+            if (!isNaN(num)) return num;
+        }
+        return val;
+    }
+    if (Array.isArray(val)) return val.map(autoConvert);
+    if (val && typeof val === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(val)) out[k] = autoConvert(v);
+        return out;
+    }
+    return val;
+}
+
+function getParamCount(fn) {
+    return fn.length;
+}
 
 function run() {
     tests.forEach((test, i) => {
@@ -348,13 +661,34 @@ function run() {
                 console.log("Test " + i + ": FAIL - function " + test.func + " not found");
                 process.exit(1);
             }
-            const result = fn(...test.args);
-            const expected = test.expected;
-            const match = Array.isArray(expected)
-                ? JSON.stringify(result) === JSON.stringify(expected)
-                : result === expected;
+            // Auto-convert the args (handles stringified lists, numbers, etc.)
+            const rawArgs = test.args;
+            if (Array.isArray(rawArgs)) {
+                // Check for invalid args BEFORE calling the function
+                for (const a of rawArgs) {
+                    if (isInvalidString(a)) {
+                        console.log("Test " + i + ": SKIP - invalid input " + JSON.stringify(a));
+                        return;
+                    }
+                }
+            }
+            const allArgs = (Array.isArray(rawArgs) ? rawArgs : [rawArgs]).map(autoConvert);
+            const paramCount = getParamCount(fn);
+            const args = allArgs.slice(0, paramCount);
+            const result = fn(...args);
+            const expected = autoConvert(test.expected);
+            const strict = test.strict === true;
+            let match;
+            if (Array.isArray(expected)) {
+                match = JSON.stringify(result) === JSON.stringify(expected);
+            } else if (strict) {
+                match = result === expected;
+            } else {
+                // Relaxed mode: treat null and undefined as equivalent
+                match = result == expected || (result == null && expected == null);
+            }
             if (!match) {
-                console.log("Test " + i + ": FAIL - got " + JSON.stringify(result) + ", expected " + JSON.stringify(expected));
+                console.log("Test " + i + ": FAIL - got " + JSON.stringify(result) + ", expected " + JSON.stringify(expected) + (strict ? " (strict)" : " (relaxed)"));
                 process.exit(1);
             }
             console.log("Test " + i + ": PASS");
@@ -384,69 +718,231 @@ func (s *SandboxService) goTestHarness(testCases string) string {
 			continue
 		}
 		seen[t.Func] = true
-		switchCases.WriteString(fmt.Sprintf("    case %s:\n        fn = reflect.ValueOf(%s)\n", strconv.Quote(t.Func), t.Func))
+		switchCases.WriteString(fmt.Sprintf("    case \"%s\":\n        fn = reflect.ValueOf(%s)\n", t.Func, t.Func))
 	}
 
-	return fmt.Sprintf(`package main
+	// Build Go source using string replacement instead of fmt.Sprintf
+	// to avoid all the %% escaping nightmares
+	goSrc := `package main
 
 import (
     "encoding/json"
     "fmt"
     "os"
     "reflect"
+    "strconv"
+    "strings"
 )
 
 type TestCase struct {
-    Func     string        `+"`json:\"func\"`"+`
-    Args     []interface{} `+"`json:\"args\"`"+`
-    Expected interface{}   `+"`json:\"expected\"`"+`
+    Func     string          __TAG_FUNC__
+    Args     json.RawMessage __TAG_ARGS__
+    Expected json.RawMessage __TAG_EXPECTED__
+}
+
+func parseArgs(raw json.RawMessage) (interface{}, error) {
+    if len(raw) == 0 {
+        return nil, nil
+    }
+    // First try: parse as-is (array, object, number, bool, null)
+    var val interface{}
+    if err := json.Unmarshal(raw, &val); err == nil {
+        // If the result is a string that looks like JSON (e.g. "[1,2,3]" or
+        // "42"), try to re-parse the string content as JSON.
+        if s, ok := val.(string); ok {
+            return parseStringifiedValue(s)
+        }
+        return val, nil
+    }
+    return nil, fmt.Errorf("cannot parse args: %s", string(raw))
+}
+
+// parseStringifiedValue handles the case where a JSON value is a string
+// that contains a JSON-encoded value, e.g. "[1,2,3]" or "42".
+func parseStringifiedValue(s string) (interface{}, error) {
+    s = strings.TrimSpace(s)
+    // Try parsing the string content as JSON (list, object, number)
+    var inner interface{}
+    if err := json.Unmarshal([]byte(s), &inner); err == nil {
+        return inner, nil
+    }
+    // Try numeric
+    if n, err := strconv.ParseFloat(s, 64); err == nil {
+        return n, nil
+    }
+    return s, nil
+}
+
+func autoConvertNums(v interface{}) interface{} {
+    switch val := v.(type) {
+    case float64:
+        if val == float64(int(val)) {
+            return int(val)
+        }
+        return val
+    case []interface{}:
+        out := make([]interface{}, len(val))
+        for i, x := range val {
+            out[i] = autoConvertNums(x)
+        }
+        return out
+    case map[string]interface{}:
+        out := make(map[string]interface{}, len(val))
+        for k, x := range val {
+            out[k] = autoConvertNums(x)
+        }
+        return out
+    case string:
+        s := strings.TrimSpace(val)
+        if s == "" || s == "-" || s == "null" || s == "undefined" || s == "nan" || s == "inf" {
+            return nil
+        }
+        // Try numeric first
+        if n, err := strconv.ParseFloat(s, 64); err == nil {
+            return autoConvertNums(n)
+        }
+        // Try parsing as JSON (handles stringified lists/objects like "[1,2,3]")
+        if (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) ||
+            (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) {
+            var inner interface{}
+            if err := json.Unmarshal([]byte(s), &inner); err == nil {
+                return autoConvertNums(inner)
+            }
+        }
+        return val
+    default:
+        return v
+    }
 }
 
 func callFunc(name string, args []interface{}) (result interface{}, callErr error) {
     defer func() {
         if r := recover(); r != nil {
-            callErr = fmt.Errorf("panic: %%v", r)
+            callErr = fmt.Errorf("panic: %v", r)
             result = nil
         }
     }()
     var fn reflect.Value
     switch name {
-%s    default:
-        return nil, fmt.Errorf("unknown function: %%s", name)
+__SWITCH_CASES__
+    default:
+        return nil, fmt.Errorf("unknown function: %s", name)
     }
-    if fn.Type().NumIn() != len(args) {
-        return nil, fmt.Errorf("expected %%d args, got %%d", fn.Type().NumIn(), len(args))
+
+    ft := fn.Type()
+    isVariadic := ft.IsVariadic()
+    numFixed := ft.NumIn()
+    if isVariadic {
+        numFixed-- // last param is the variadic one
     }
-    in := make([]reflect.Value, len(args))
-    for i, a := range args {
-        fnType := fn.Type().In(i)
-        if fnType.Kind() == reflect.Slice {
-            src := reflect.ValueOf(a)
-            if src.IsValid() && src.Kind() == reflect.Slice {
-                dst := reflect.MakeSlice(fnType, src.Len(), src.Len())
-                for j := 0; j < src.Len(); j++ {
-                    elem := src.Index(j).Interface()
-                    if n, ok := elem.(float64); ok && fnType.Elem().Kind() == reflect.Int {
-                        dst.Index(j).Set(reflect.ValueOf(int(n)))
-                    } else {
-                        dst.Index(j).Set(reflect.ValueOf(elem))
-                    }
-                }
-                in[i] = dst
-                continue
+
+    // Count how many args we actually have for fixed params + variadic
+    if len(args) < numFixed {
+        return nil, fmt.Errorf("expected at least %d args, got %d", numFixed, len(args))
+    }
+
+    // Build the reflect.Value slice
+    in := make([]reflect.Value, 0, len(args))
+
+    // Fixed parameters
+    for i := 0; i < numFixed; i++ {
+        in = append(in, convertArg(args[i], ft.In(i)))
+    }
+
+    // Variadic parameter
+    if isVariadic {
+        varType := ft.In(numFixed).Elem() // element type of the variadic slice
+        variadicArgs := args[numFixed:]
+        // If there's exactly one arg and it's a list, unpack it.
+        // This handles the case where the employer enters [1,2,3,4] as
+        // a single input string — the harness wraps it as [[1,2,3,4]],
+        // but a variadic func expects individual args [1,2,3,4].
+        if len(variadicArgs) == 1 {
+            if list, ok := variadicArgs[0].([]interface{}); ok {
+                variadicArgs = list
             }
         }
-        if n, ok := a.(float64); ok {
-            in[i] = reflect.ValueOf(int(n))
-        } else {
-            in[i] = reflect.ValueOf(a)
+        for _, a := range variadicArgs {
+            in = append(in, convertArg(a, varType))
+        }
+    } else {
+        // Non-variadic: remaining args
+        for i := numFixed; i < len(args) && i < ft.NumIn(); i++ {
+            in = append(in, convertArg(args[i], ft.In(i)))
         }
     }
+
     results := fn.Call(in)
     if len(results) == 0 {
         return nil, nil
     }
     return results[0].Interface(), nil
+}
+
+// convertArg converts a single argument from interface{} to the target reflect.Type.
+func convertArg(a interface{}, targetType reflect.Type) reflect.Value {
+    // Handle stringified JSON values
+    if s, ok := a.(string); ok {
+        s = strings.TrimSpace(s)
+        if s == "" || s == "-" || s == "null" || s == "undefined" || s == "nan" || s == "inf" {
+            a = nil
+        } else if (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) ||
+            (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) {
+            var inner interface{}
+            if err := json.Unmarshal([]byte(s), &inner); err == nil {
+                a = inner
+            }
+        } else if n, err := strconv.ParseFloat(s, 64); err == nil {
+            a = n
+        }
+    }
+
+    // nil handling
+    if a == nil {
+        return reflect.Zero(targetType)
+    }
+
+    // If target is a slice type, build the slice from an array/list
+    if targetType.Kind() == reflect.Slice {
+        src := reflect.ValueOf(a)
+        if src.IsValid() && src.Kind() == reflect.Slice {
+            elemType := targetType.Elem()
+            dst := reflect.MakeSlice(targetType, src.Len(), src.Len())
+            for j := 0; j < src.Len(); j++ {
+                elem := src.Index(j).Interface()
+                dst.Index(j).Set(convertArg(elem, elemType))
+            }
+            return dst
+        }
+        // a is not a slice but target expects one — wrap it
+        dst := reflect.MakeSlice(targetType, 1, 1)
+        dst.Index(0).Set(convertArg(a, targetType.Elem()))
+        return dst
+    }
+
+    // Numeric conversion
+    if n, ok := a.(float64); ok {
+        switch targetType.Kind() {
+        case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+            return reflect.ValueOf(int(n)).Convert(targetType)
+        case reflect.Float32, reflect.Float64:
+            return reflect.ValueOf(n).Convert(targetType)
+        }
+    }
+    if n, ok := a.(int); ok {
+        switch targetType.Kind() {
+        case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+            return reflect.ValueOf(n).Convert(targetType)
+        case reflect.Float32, reflect.Float64:
+            return reflect.ValueOf(float64(n)).Convert(targetType)
+        }
+    }
+
+    val := reflect.ValueOf(a)
+    if val.Type().ConvertibleTo(targetType) {
+        return val.Convert(targetType)
+    }
+    return val
 }
 
 func normalize(v interface{}) interface{} {
@@ -471,27 +967,70 @@ func normalize(v interface{}) interface{} {
 }
 
 func main() {
+    data, err := os.ReadFile("/code/tests.json")
+    if err != nil {
+        fmt.Println("FAIL - cannot read tests.json:", err)
+        os.Exit(1)
+    }
     var tests []TestCase
-    if err := json.Unmarshal([]byte(%s), &tests); err != nil {
+    if err := json.Unmarshal(data, &tests); err != nil {
         fmt.Println("FAIL - invalid tests:", err)
         os.Exit(1)
     }
     for i, test := range tests {
-        result, err := callFunc(test.Func, test.Args)
+        // Detect if the original args value was a JSON string (not an array).
+        // e.g. "args": "[1,2,3,4]" is a stringified list — the whole thing
+        // is one argument. "args": [[1,2,3,4]] is a proper array of arguments.
+        var argsWasString bool
+        {
+            var check interface{}
+            if json.Unmarshal(test.Args, &check) == nil {
+                _, argsWasString = check.(string)
+            }
+        }
+
+        rawArgs, err := parseArgs(test.Args)
         if err != nil {
-            fmt.Printf("Test %%d: FAIL - %%s\\n", i, err)
+            fmt.Printf("Test %d: SKIP - bad args: %s\n", i, err)
+            continue
+        }
+        argsList, ok := rawArgs.([]interface{})
+        if !ok || argsWasString {
+            // If args was a JSON string (like "[1,2,3,4]" or "42"),
+            // the parsed value is the argument itself, not a list of arguments.
+            argsList = []interface{}{rawArgs}
+        }
+        for j, a := range argsList {
+            argsList[j] = autoConvertNums(a)
+        }
+        rawExpected, err := parseArgs(test.Expected)
+        if err != nil {
+            rawExpected = nil
+        }
+        rawExpected = autoConvertNums(rawExpected)
+        result, err := callFunc(test.Func, argsList)
+        if err != nil {
+            fmt.Printf("Test %d: FAIL - %s\n", i, err)
             os.Exit(1)
         }
-        if reflect.DeepEqual(normalize(result), normalize(test.Expected)) {
-            fmt.Printf("Test %%d: PASS\\n", i)
+        if reflect.DeepEqual(normalize(result), normalize(rawExpected)) {
+            fmt.Printf("Test %d: PASS\n", i)
         } else {
-            fmt.Printf("Test %%d: FAIL - got %%v, expected %%v\\n", i, result, test.Expected)
+            fmt.Printf("Test %d: FAIL - got %v, expected %v\n", i, result, rawExpected)
             os.Exit(1)
         }
     }
     fmt.Println("ALL TESTS PASSED")
 }
-`, switchCases.String(), strconv.Quote(testCases))
+`
+	goSrc = strings.Replace(goSrc, "__SWITCH_CASES__", switchCases.String(), 1)
+	tagFunc := "`" + `json:"func"` + "`"
+	tagArgs := "`" + `json:"args"` + "`"
+	tagExpected := "`" + `json:"expected"` + "`"
+	goSrc = strings.Replace(goSrc, "__TAG_FUNC__", tagFunc, 1)
+	goSrc = strings.Replace(goSrc, "__TAG_ARGS__", tagArgs, 1)
+	goSrc = strings.Replace(goSrc, "__TAG_EXPECTED__", tagExpected, 1)
+	return goSrc
 }
 
 func (s *SandboxService) buildFrameworkTestCmd(language string) []string {

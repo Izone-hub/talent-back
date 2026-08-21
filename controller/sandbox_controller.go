@@ -59,3 +59,28 @@ func (c *SandboxController) ListLanguages(w http.ResponseWriter, r *http.Request
 		"languages": languages,
 	})
 }
+
+func (c *SandboxController) ParseCode(w http.ResponseWriter, r *http.Request) {
+	var req models.ParseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	if req.Language == "" {
+		writeError(w, http.StatusBadRequest, "language is required")
+		return
+	}
+	if req.Code == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	result, err := c.sandboxService.ParseCode(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}

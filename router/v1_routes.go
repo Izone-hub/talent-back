@@ -103,6 +103,10 @@ func V1Routes(
 
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.DeleteQuestion)))
 
+	mux.HandleFunc("POST /api/v1/questions/{id}/test", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.TestQuestion)))
+
+	mux.HandleFunc("POST /api/v1/questions/{id}/validate", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.ValidateQuestion)))
+
 	// -----------------------------------------------------------------------
 	// Quiz routes
 	// -----------------------------------------------------------------------
@@ -138,6 +142,7 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/sandbox/languages", authMiddleware.Authenticate(sandboxController.ListLanguages))
 	mux.HandleFunc("POST /api/v1/sandbox/execute", authMiddleware.Authenticate(sandboxController.Execute))
+	mux.HandleFunc("POST /api/v1/sandbox/parse", authMiddleware.Authenticate(sandboxController.ParseCode))
 
 	// -----------------------------------------------------------------------
 	// Intelligence routes

@@ -29,3 +29,20 @@ type ExecuteResponse struct {
 	Passed   *bool  `json:"passed,omitempty"`
 	Error    string `json:"error,omitempty"`
 }
+
+type ParseRequest struct {
+	Language string `json:"language"`
+	Code     string `json:"code"`
+}
+
+type ParsedFunction struct {
+	Name       string   `json:"name"`
+	Args       []string `json:"args"`
+	StartLine  int      `json:"startLine"`
+	EndLine    int      `json:"endLine"`
+}
+
+type ParseResponse struct {
+	Functions []ParsedFunction `json:"functions"`
+	Error     string           `json:"error,omitempty"`
+}
