@@ -28,6 +28,10 @@ type langConfig struct {
 	RunCmd   []string // template; {file} is replaced
 	TestCmd  []string
 	Env      []string
+
+	HarnessExt string            // extension for the generated function-mode harness (defaults to Ext)
+	FnRunCmd   []string          // optional override command for function-mode execution ({file} = harness path)
+	ExtraFiles map[string]string // auxiliary files written into the work dir (e.g. runners)
 }
 
 func (s *SandboxService) langConfig(lang string) (langConfig, error) {
@@ -96,6 +100,49 @@ func (s *SandboxService) langConfig(lang string) (langConfig, error) {
 			Ext:     ".ts",
 			RunCmd:  []string{"npx", "tsx", "{file}"},
 			TestCmd: []string{"npx", "vitest", "run", "{file}"},
+		}, nil
+	case "dart":
+		return langConfig{
+			Image:    "dart:stable",
+			Ext:      ".dart",
+			Filename: "main.dart",
+			RunCmd:   []string{"dart", "run", "{file}"},
+			TestCmd:  []string{"sh", "-c", "cd /code && dart test"},
+			Env:      []string{"HOME=/tmp", "PUB_CACHE=/tmp/pubcache"},
+		}, nil
+	case "sql", "sqlite":
+		return langConfig{
+			Image:      "python:3.12-slim",
+			Ext:        ".sql",
+			RunCmd:     []string{"python", "/code/__sql_runner__.py", "{file}"},
+			HarnessExt: ".py",
+			FnRunCmd:   []string{"python", "/code/test_runner.py"},
+			ExtraFiles: map[string]string{"__sql_runner__.py": sqlRunnerScript},
+		}, nil
+	case "react", "vue", "svelte":
+		return langConfig{
+			Image:  "sandbox-node:22",
+			Ext:    ".jsx",
+			RunCmd: []string{"node", "{file}"},
+		}, nil
+	case "express":
+		return langConfig{
+			Image:  "sandbox-node:22",
+			Ext:    ".js",
+			RunCmd: []string{"node", "{file}"},
+		}, nil
+	case "nextjs", "next.js", "next":
+		return langConfig{
+			Image:  "sandbox-node:22",
+			Ext:    ".tsx",
+			RunCmd: []string{"node", "{file}"},
+		}, nil
+	case "flutter":
+		return langConfig{
+			Image:  "sandbox-flutter:3.27",
+			Ext:    ".dart",
+			RunCmd: []string{"flutter", "test", "{file}"},
+			Env:    []string{"HOME=/tmp"},
 		}, nil
 	default:
 		return langConfig{}, fmt.Errorf("unsupported language: %s", lang)
@@ -280,6 +327,12 @@ func (s *SandboxService) executeStandard(ctx context.Context, cfg langConfig, re
 		return nil, fmt.Errorf("failed to write code: %w", err)
 	}
 
+	for name, content := range cfg.ExtraFiles {
+		if err := os.WriteFile(filepath.Join(workDir, name), []byte(content), 0644); err != nil {
+			return nil, fmt.Errorf("failed to write %s: %w", name, err)
+		}
+	}
+
 	cmdArgs := replaceFile(cfg.RunCmd, "/code/"+filename)
 	return s.runDocker(ctx, cfg.Image, workDir, cmdArgs, req.Stdin, req.TimeLimit, req.MemoryLimit, cfg.Env...)
 }
@@ -301,9 +354,31 @@ func (s *SandboxService) executeFunction(ctx context.Context, cfg langConfig, re
 	if err != nil {
 		return &models.ExecuteResponse{Error: err.Error()}, nil
 	}
-	testFile := filepath.Join(workDir, "test_runner"+cfg.Ext)
+	harnessExt := cfg.HarnessExt
+	if harnessExt == "" {
+		harnessExt = cfg.Ext
+	}
+	testFile := filepath.Join(workDir, "test_runner"+harnessExt)
 	if err := os.WriteFile(testFile, []byte(testHarness), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write test harness: %w", err)
+	}
+
+	for name, content := range cfg.ExtraFiles {
+		if err := os.WriteFile(filepath.Join(workDir, name), []byte(content), 0644); err != nil {
+			return nil, fmt.Errorf("failed to write %s: %w", name, err)
+		}
+	}
+
+	// Additional request files (e.g. SQL questions ship schema.sql /
+	// seed.sql so the harness can rebuild the imported database).
+	for path, content := range req.Files {
+		full := filepath.Join(workDir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			return nil, fmt.Errorf("failed to create dir for %s: %w", path, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			return nil, fmt.Errorf("failed to write %s: %w", path, err)
+		}
 	}
 
 	// Always write test cases to a JSON file so harnesses can read from disk
@@ -311,7 +386,11 @@ func (s *SandboxService) executeFunction(ctx context.Context, cfg langConfig, re
 	testsJSONFile := filepath.Join(workDir, "tests.json")
 	_ = os.WriteFile(testsJSONFile, []byte(req.Stdin), 0644)
 
-	cmdArgs := replaceFile(cfg.RunCmd, "/code/test_runner"+cfg.Ext)
+	runTemplate := cfg.RunCmd
+	if len(cfg.FnRunCmd) > 0 {
+		runTemplate = cfg.FnRunCmd
+	}
+	cmdArgs := replaceFile(runTemplate, "/code/test_runner"+harnessExt)
 	resp, dErr := s.runDocker(ctx, cfg.Image, workDir, cmdArgs, "", req.TimeLimit, req.MemoryLimit, cfg.Env...)
 	if dErr != nil {
 		return nil, dErr
@@ -451,9 +530,371 @@ func (s *SandboxService) generateTestHarness(language, testCases string) (string
 		return s.jsTestHarness(testCases), nil
 	case "go", "golang":
 		return s.goTestHarness(testCases), nil
+	case "dart":
+		return s.dartTestHarness(testCases), nil
+	case "sql", "sqlite":
+		return s.sqlTestHarness(testCases), nil
 	default:
 		return "", fmt.Errorf("function test not supported for language: %s", language)
 	}
+}
+
+func (s *SandboxService) dartTestHarness(testCases string) string {
+	return `import 'dart:convert';
+import 'dart:io';
+import 'dart:mirrors';
+
+import 'solution.dart';
+
+const _invalidStrings = {'', '-', '--', '.', 'null', 'none', 'undefined', 'nan', 'inf', 'infinity'};
+
+bool _invalid(String v) => _invalidStrings.contains(v.trim().toLowerCase());
+
+bool deepEq(dynamic a, dynamic b) {
+  if (identical(a, b)) return true;
+  if (a is num && b is num) {
+    if (a is double && b is int) return a == b.toDouble();
+    if (a is int && b is double) return a.toDouble() == b;
+    return a == b;
+  }
+  if (a is List && b is List) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!deepEq(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (a is Map && b is Map) {
+    if (a.length != b.length) return false;
+    for (final k in a.keys) {
+      if (!b.containsKey(k) || !deepEq(a[k], b[k])) return false;
+    }
+    return true;
+  }
+  return a == b;
+}
+
+dynamic norm(dynamic v) {
+  if (v is double && !v.isInfinite && v == v.truncateToDouble()) return v.toInt();
+  if (v is List) return v.map(norm).toList();
+  if (v is Map) return v.map((k, val) => MapEntry(k.toString(), norm(val)));
+  return v;
+}
+
+TypeMirror _target(Type type) => reflectType(type);
+
+bool _isA(TypeMirror t, Type type) {
+  final target = _target(type);
+  return t == target || t.isSubtypeOf(target);
+}
+
+bool _isList(TypeMirror t) => _isA(t, List);
+bool _isMap(TypeMirror t) => _isA(t, Map);
+
+// _convert turns a decoded JSON value into an instance matching the
+// declared parameter type of the user's function.
+dynamic _convert(dynamic v, TypeMirror t) {
+  if (v == null) return null;
+  if (_isA(t, int)) {
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v.trim());
+    return null;
+  }
+  if (_isA(t, double)) {
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim());
+    return null;
+  }
+  if (_isA(t, num)) {
+    if (v is num) return v;
+    return num.tryParse(v.toString());
+  }
+  if (_isA(t, String)) return v.toString();
+  if (_isA(t, bool)) {
+    if (v is bool) return v;
+    return v.toString() == 'true';
+  }
+  if (_isList(t)) {
+    TypeMirror elem = reflectType(dynamic);
+    if (t is ClassMirror && t.typeArguments.isNotEmpty) elem = t.typeArguments[0];
+    final src = (v is List ? v : [v]).map((e) => _convert(e, elem)).toList();
+    // Dart generics are reified: a List<dynamic> cannot flow into a
+    // List<int> parameter, so rebuild the collection with its exact type.
+    if (t is ClassMirror && !identical(elem, reflectType(dynamic))) {
+      try {
+        return t.newInstance(#from, [src]).reflectee;
+      } catch (_) {}
+    }
+    return src;
+  }
+  if (_isMap(t)) {
+    TypeMirror val = reflectType(dynamic);
+    if (t is ClassMirror && t.typeArguments.length > 1) val = t.typeArguments[1];
+    final out = <dynamic, dynamic>{};
+    if (v is Map) {
+      v.forEach((k, e) {
+        out[k.toString()] = _convert(e, val);
+      });
+    }
+    if (t is ClassMirror && !identical(val, reflectType(dynamic))) {
+      try {
+        return t.newInstance(#from, [out]).reflectee;
+      } catch (_) {}
+    }
+    return out;
+  }
+  return v;
+}
+
+// _auto mirrors the JS/Python harnesses: numeric strings become numbers,
+// stringified JSON ("[1,2,3]") becomes real structures.
+dynamic _auto(dynamic v) {
+  if (v is String) {
+    final s = v.trim();
+    if (_invalid(s)) return null;
+    if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('{') && s.endsWith('}'))) {
+      try {
+        return _auto(jsonDecode(s));
+      } catch (_) {}
+    }
+    return num.tryParse(s) ?? v;
+  }
+  if (v is List) return v.map(_auto).toList();
+  if (v is Map) return v.map((k, e) => MapEntry(k.toString(), _auto(e)));
+  return v;
+}
+
+void main() {
+  LibraryMirror? sol;
+  currentMirrorSystem().libraries.forEach((uri, lib) {
+    if (sol == null && uri.toString().endsWith('/solution.dart')) {
+      sol = lib;
+    }
+  });
+  sol ??= currentMirrorSystem().isolate.rootLibrary;
+  if (sol == null) {
+    print('FAIL - cannot locate solution library');
+    exit(1);
+  }
+
+  final tests = jsonDecode(File('/code/tests.json').readAsStringSync()) as List;
+  for (var i = 0; i < tests.length; i++) {
+    final t = tests[i] as Map;
+    final name = t['func'] as String? ?? '';
+    final sym = Symbol(name);
+    final decl = sol!.declarations[sym];
+    if (decl is! MethodMirror) {
+      print('Test $i: FAIL - function $name not found');
+      exit(1);
+    }
+    try {
+      final rawArgs = t['args'];
+      final provided = rawArgs is List ? rawArgs : (rawArgs == null ? [] : [rawArgs]);
+
+      var skip = false;
+      for (final a in provided) {
+        if (a is String && _invalid(a)) {
+          print('Test $i: SKIP - invalid input $a');
+          skip = true;
+          break;
+        }
+      }
+      if (skip) continue;
+
+      final params = decl.parameters;
+      final args = <Object?>[];
+      final n = provided.length < params.length ? provided.length : params.length;
+      for (var j = 0; j < n; j++) {
+        args.add(_convert(provided[j], params[j].type));
+      }
+
+      final result = sol!.invoke(sym, args).reflectee;
+      final expected = _auto(t['expected']);
+      if (deepEq(norm(result), norm(expected))) {
+        print('Test $i: PASS');
+      } else {
+        print('Test $i: FAIL - got $result, expected ${jsonEncode(expected)}');
+        exit(1);
+      }
+    } catch (e) {
+      print('Test $i: FAIL - $e');
+      exit(1);
+    }
+  }
+  print('ALL TESTS PASSED');
+}
+`
+}
+
+// sqlRunnerScript executes a .sql file against an in-memory SQLite database.
+// If schema.sql / seed.sql exist next to it they are applied first.
+const sqlRunnerScript = `import os
+import sqlite3
+import sys
+
+def apply_file(con, path):
+    with open(path) as f:
+        con.executescript(f.read())
+
+def run_statement(cur, stmt):
+    cur.execute(stmt)
+    rows = cur.fetchall()
+    if rows:
+        if cur.description:
+            print("|".join(d[0] or "" for d in cur.description))
+        for r in rows:
+            print("|".join("NULL" if v is None else str(v) for v in r))
+        print()
+
+def main():
+    target = sys.argv[1]
+    con = sqlite3.connect(":memory:")
+    con.isolation_level = None
+    cur = con.cursor()
+    for aux in ("/code/schema.sql", "/code/seed.sql"):
+        if os.path.exists(aux):
+            apply_file(con, aux)
+
+    with open(target) as f:
+        sql = f.read()
+
+    stmt = ""
+    for line in sql.splitlines():
+        stmt += line + "\n"
+        if sqlite3.complete_statement(stmt):
+            s = stmt.strip()
+            stmt = ""
+            if not s:
+                continue
+            try:
+                run_statement(cur, s)
+            except Exception as e:
+                print(f"ERROR: {e}", file=sys.stderr)
+                sys.exit(1)
+    if stmt.strip():
+        try:
+            run_statement(cur, stmt.strip())
+        except Exception as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
+
+main()
+`
+
+func (s *SandboxService) sqlTestHarness(testCases string) string {
+	return `import json
+import os
+import sqlite3
+import sys
+
+SOLUTION_PATH = "/code/solution.sql"
+
+
+def fresh_db(setup_sql=None):
+    """Rebuild the imported database: schema + seed (+ per-test setup)."""
+    con = sqlite3.connect(":memory:")
+    for aux in ("/code/schema.sql", "/code/seed.sql"):
+        if os.path.exists(aux):
+            with open(aux) as f:
+                con.executescript(f.read())
+    if setup_sql:
+        con.executescript(setup_sql)
+    return con
+
+
+def norm(v):
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, float) and v.is_integer() and abs(v) < 1e15:
+        return int(v)
+    return v
+
+
+def norm_rows(rows):
+    return [[norm(c) for c in row] for row in rows]
+
+
+def wrap(expected):
+    # Accept scalars, single rows, or full row sets.
+    if expected is None:
+        return None
+    if not isinstance(expected, list):
+        return [[norm(expected)]]
+    if expected and not any(isinstance(x, (list, tuple)) for x in expected):
+        return [[norm(x) for x in expected]]
+    return norm_rows(expected)
+
+
+def compare(actual, expected, ordered=True):
+    exp = wrap(expected)
+    act = norm_rows(actual)
+    if exp is None:
+        return True
+    if not ordered:
+        def key(rows):
+            return sorted(json.dumps(r, sort_keys=True, default=str) for r in rows)
+        return key(act) == key(exp)
+    return act == exp
+
+
+def main():
+    with open("/code/tests.json") as f:
+        tests = json.load(f)
+
+    solution = ""
+    if os.path.exists(SOLUTION_PATH):
+        with open(SOLUTION_PATH) as f:
+            solution = f.read()
+
+    has_solution = bool(solution.strip())
+
+    for i, t in enumerate(tests):
+        label = t.get("name") or ("test %d" % i)
+        try:
+            con = fresh_db(t.get("setup"))
+            cur = con.cursor()
+            verify = t.get("verify")
+            query = t.get("query")
+            if verify:
+                # Write task (INSERT/UPDATE/DELETE/DDL): apply the student's
+                # statements first, then run the verification query against
+                # the resulting database state.
+                if has_solution:
+                    con.executescript(solution)
+                cur.execute(verify)
+            elif query is not None or t.get("expected_rows", t.get("expected")) is not None:
+                # Read task: run the given query on a fresh imported DB.
+                stmt = query if query else solution
+                if not (stmt or "").strip():
+                    print("Test %d (%s): FAIL - no query to execute" % (i, label))
+                    sys.exit(1)
+                cur.execute(stmt)
+            elif has_solution:
+                # No explicit query: treat the student's SQL itself as the
+                # statement whose result set we compare.
+                cur.execute(solution)
+            else:
+                print("Test %d (%s): FAIL - nothing to execute" % (i, label))
+                sys.exit(1)
+            actual = cur.fetchall()
+            con.close()
+        except Exception as e:
+            print("Test %d (%s): FAIL - %s" % (i, label, e))
+            sys.exit(1)
+
+        expected = t.get("expected_rows", t.get("expected"))
+        ordered = t.get("ordered", True)
+        if compare(actual, expected, ordered):
+            print("Test %d (%s): PASS" % (i, label))
+        else:
+            print("Test %d (%s): FAIL - got %s, expected %s"
+                  % (i, label, json.dumps(norm_rows(actual)), json.dumps(wrap(expected))))
+            sys.exit(1)
+    print("ALL TESTS PASSED")
+
+
+main()
+`
 }
 
 func (s *SandboxService) pyTestHarness(testCases string) string {
@@ -1041,6 +1482,10 @@ func (s *SandboxService) buildFrameworkTestCmd(language string) []string {
 		return []string{"sh", "-c", "npm install --silent 2>/dev/null; npm test 2>/dev/null"}
 	case "typescript", "ts":
 		return []string{"sh", "-c", "npm install --silent 2>/dev/null; npm test 2>/dev/null"}
+	case "react", "vue", "svelte", "express", "nextjs":
+		return []string{"sh", "-c", "npm install --silent 2>/dev/null; npm test 2>/dev/null"}
+	case "flutter":
+		return []string{"sh", "-c", "flutter pub get --offline 2>/dev/null; flutter test --reporter expanded"}
 	case "go", "golang":
 		return []string{"sh", "-c", "go test -v ./..."}
 	case "java":

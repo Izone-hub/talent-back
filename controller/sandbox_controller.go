@@ -54,6 +54,15 @@ func (c *SandboxController) ListLanguages(w http.ResponseWriter, r *http.Request
 		{"id": "rust", "name": "Rust", "type": "standard"},
 		{"id": "ruby", "name": "Ruby", "type": "standard"},
 		{"id": "typescript", "name": "TypeScript", "type": "standard"},
+		{"id": "dart", "name": "Dart", "type": "standard"},
+		{"id": "sql", "name": "SQL (SQLite)", "type": "standard"},
+
+		{"id": "react", "name": "React", "type": "framework"},
+		{"id": "vue", "name": "Vue", "type": "framework"},
+		{"id": "svelte", "name": "Svelte", "type": "framework"},
+		{"id": "express", "name": "Node.js / Express", "type": "framework"},
+		{"id": "nextjs", "name": "Next.js", "type": "framework"},
+		{"id": "flutter", "name": "Flutter", "type": "framework"},
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"languages": languages,

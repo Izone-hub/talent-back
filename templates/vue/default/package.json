@@ -1,0 +1,17 @@
+{
+  "name": "sandbox-vue",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "vue": "^3.4.38"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.2",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^24.1.3",
+    "vitest": "^2.0.5"
+  }
+}
