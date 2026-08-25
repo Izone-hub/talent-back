@@ -11,13 +11,47 @@
 
 ### 1. Sandbox Setup (Recommended)
 
-Build custom sandbox Docker images (Go, TypeScript):
+Build custom sandbox Docker images (Go, TypeScript, Flutter):
 ```bash
 docker build -t sandbox-go:1.25 -f templates/Dockerfile.sandbox-go .
 docker build -t sandbox-node:22 -f templates/Dockerfile.sandbox-node .
+docker build -t sandbox-flutter:3.27 -f templates/Dockerfile.sandbox-flutter .
 ```
 
-Start a local PostgreSQL and load sample data:
+Vendor node_modules into the Node-based framework templates (required — sandbox
+containers run with `--network none`, so `npm install` inside them cannot reach
+the registry):
+```bash
+./templates/vendor-node-modules.sh
+```
+
+### Supported Sandbox Languages & Frameworks
+
+**Languages (`type: standard`)** — Python, JavaScript, TypeScript, Go, Java,
+C++, C, Rust, Ruby, **Dart**, **SQL (SQLite)**.
+
+- **Dart**: runs with the official `dart:stable` image; function-mode tests use
+  a generated harness + `dart:mirrors`.
+- **SQL (SQLite)**: executes `.sql` against an in-memory SQLite DB via a bundled
+  Python runner. If `schema.sql` / `seed.sql` are present in the template they
+  are applied first. Function mode compares query result rows against
+  `expected_rows` (or `expected`) per test case:
+  `[{"query": "SELECT ...", "expected": [[1], [2]]}]`.
+
+**Frameworks (`type: framework`)** — React, Vue, Svelte, Node.js/Express,
+Next.js, Flutter. Framework execution copies `templates/<framework>/<template_id>`
+(default: `default`) and runs the framework test suite:
+
+| Framework | Test command | Notes |
+|---|---|---|
+| React | `npm test` (Vitest + Testing Library) | deps vendored by script above |
+| Vue | `npm test` (Vitest + @vue/test-utils) | |
+| Svelte | `npm test` (Vitest + Testing Library Svelte) | |
+| Express | `npm test` (Vitest + Supertest) | |
+| Next.js | `npm test` (Vitest + Testing Library) | component tests only; no SSR/dev server offline |
+| Flutter | `flutter pub get --offline; flutter test` | uses `sandbox-flutter:3.27`; template ships only SDK deps so it works fully offline |
+
+### Start a local PostgreSQL and load sample data:
 
 ```bash
 # Start PostgreSQL

@@ -1,0 +1,5 @@
+FROM ghcr.io/cirruslabs/flutter:3.27.0
+
+RUN flutter config --no-analytics \
+ && flutter precache \
+ && flutter doctor

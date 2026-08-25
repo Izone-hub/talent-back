@@ -715,22 +715,41 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, questionID, la
 		lang = dbLang
 	}
 
-	// Use AST-based detection for function names
+	isSQL := strings.EqualFold(lang, "sql") || strings.EqualFold(lang, "sqlite")
+
+	// SQL questions carry their own document shape (imported database +
+	// query/verify tests), so normalize them up-front.
+	var sqlFiles map[string]string
+	var sqlTestsPayload string
+	if isSQL {
+		payload, files, pErr := BuildSQLPayload(testCases)
+		if pErr != nil {
+			return nil, fmt.Errorf("invalid SQL test cases: %w", pErr)
+		}
+		sqlTestsPayload = payload
+		sqlFiles = files
+	}
+
 	sandbox := &SandboxService{}
-	parseReq := models.ParseRequest{Language: lang, Code: code}
-	parseResp, parseErr := sandbox.ParseCode(ctx, parseReq)
 
 	var detectedFunc string
-	if parseErr == nil && len(parseResp.Functions) > 0 {
-		detectedFunc = parseResp.Functions[0].Name
-	} else {
-		detectedFunc = detectFunctionName(code, lang)
+	if !isSQL {
+		parseReq := models.ParseRequest{Language: lang, Code: code}
+		parseResp, parseErr := sandbox.ParseCode(ctx, parseReq)
+
+		if parseErr == nil && len(parseResp.Functions) > 0 {
+			detectedFunc = parseResp.Functions[0].Name
+		} else {
+			detectedFunc = detectFunctionName(code, lang)
+		}
 	}
 
 	// Filter to only visible test cases and convert to sandbox format
 	var allTests []map[string]interface{}
-	if err := json.Unmarshal(testCases, &allTests); err != nil {
-		return nil, fmt.Errorf("invalid test cases: %w", err)
+	if !isSQL {
+		if err := json.Unmarshal(testCases, &allTests); err != nil {
+			return nil, fmt.Errorf("invalid test cases: %w", err)
+		}
 	}
 
 	var sandboxTests []map[string]interface{}
@@ -802,7 +821,7 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, questionID, la
 	}
 
 	codeDefinesFunc := hasFunctionDefinition(code, lang)
-	useFunctionMode := hasFuncField || codeDefinesFunc
+	useFunctionMode := hasFuncField || codeDefinesFunc || isSQL
 
 	if !useFunctionMode && len(sandboxTests) > 0 {
 		// Simple output-based question: run code with stdin, compare stdout to expected
@@ -865,6 +884,10 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, questionID, la
 		Stdin:       string(sandboxTestsJSON),
 		TimeLimit:   execTimeLimit,
 		MemoryLimit: memLimit,
+	}
+	if isSQL {
+		req.Stdin = sqlTestsPayload
+		req.Files = sqlFiles
 	}
 
 	resp, err := sandbox.Execute(ctx, req)

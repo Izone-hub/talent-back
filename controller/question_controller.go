@@ -188,14 +188,37 @@ func (c *QuestionController) TestQuestion(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var testCases []map[string]interface{}
-	if err := json.Unmarshal(question.CodingDetails.TestCases, &testCases); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid test cases format")
-		return
+	sandbox := &service.SandboxService{}
+	lang := question.CodingDetails.Language
+	code := req.Code
+
+	isSQL := strings.EqualFold(lang, "sql") || strings.EqualFold(lang, "sqlite")
+	var sqlFiles map[string]string
+	var sqlStdin string
+	if isSQL {
+		payload, files, pErr := service.BuildSQLPayload(question.CodingDetails.TestCases)
+		if pErr != nil {
+			writeError(w, http.StatusBadRequest, "Invalid SQL test cases: "+pErr.Error())
+			return
+		}
+		if payload == "[]" {
+			writeError(w, http.StatusBadRequest, "No test cases defined for this question")
+			return
+		}
+		sqlStdin = payload
+		sqlFiles = files
 	}
-	if len(testCases) == 0 {
-		writeError(w, http.StatusBadRequest, "No test cases defined for this question")
-		return
+
+	var testCases []map[string]interface{}
+	if !isSQL {
+		if err := json.Unmarshal(question.CodingDetails.TestCases, &testCases); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid test cases format")
+			return
+		}
+		if len(testCases) == 0 {
+			writeError(w, http.StatusBadRequest, "No test cases defined for this question")
+			return
+		}
 	}
 
 	// Detect execution type:
@@ -210,12 +233,8 @@ func (c *QuestionController) TestQuestion(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	sandbox := &service.SandboxService{}
-	lang := question.CodingDetails.Language
-	code := req.Code
-
 	codeDefinesFunc := hasFunctionDefinition(code, lang)
-	useFunctionMode := hasFuncField || codeDefinesFunc
+	useFunctionMode := hasFuncField || codeDefinesFunc || isSQL
 
 	if !useFunctionMode {
 		// Standard execution: run code with stdin, compare stdout to expected
@@ -249,37 +268,51 @@ func (c *QuestionController) TestQuestion(w http.ResponseWriter, r *http.Request
 	}
 
 	// Function execution: use test harness
-	detectedFunc := detectFunctionName(code, lang)
 	var sandboxTests []map[string]interface{}
-	for _, tc := range testCases {
-		fn, _ := tc["func"].(string)
-		if fn == "" {
-			fn = detectedFunc
-		}
-		args := tc["args"]
-		if args == nil {
-			if input, ok := tc["input"]; ok {
-				args = input
+	if isSQL {
+		sandboxTests = nil
+	} else {
+		detectedFunc := detectFunctionName(code, lang)
+		for _, tc := range testCases {
+			fn, _ := tc["func"].(string)
+			if fn == "" {
+				fn = detectedFunc
 			}
+			args := tc["args"]
+			if args == nil {
+				if input, ok := tc["input"]; ok {
+					args = input
+				}
+			}
+			expected := tc["expected"]
+			if expected == nil {
+				expected = tc["expected_output"]
+			}
+			sandboxTests = append(sandboxTests, map[string]interface{}{
+				"func":     fn,
+				"args":     args,
+				"expected": expected,
+			})
 		}
-		expected := tc["expected"]
-		if expected == nil {
-			expected = tc["expected_output"]
-		}
-		sandboxTests = append(sandboxTests, map[string]interface{}{
-			"func":     fn,
-			"args":     args,
-			"expected": expected,
-		})
 	}
-	sandboxTestsJSON, _ := json.Marshal(sandboxTests)
 
-	resp, err := sandbox.Execute(r.Context(), models.ExecuteRequest{
+	stdinPayload := ""
+	if isSQL {
+		stdinPayload = sqlStdin
+	} else {
+		b, _ := json.Marshal(sandboxTests)
+		stdinPayload = string(b)
+	}
+
+	execReq := models.ExecuteRequest{
 		Language: lang,
 		Code:     code,
 		Type:     models.ExecutionTypeFunction,
-		Stdin:    string(sandboxTestsJSON),
-	})
+		Stdin:    stdinPayload,
+		Files:    sqlFiles,
+	}
+
+	resp, err := sandbox.Execute(r.Context(), execReq)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Execution failed: "+err.Error())
 		return
@@ -324,18 +357,37 @@ func (c *QuestionController) ValidateQuestion(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var testCases []map[string]interface{}
-	if err := json.Unmarshal(question.CodingDetails.TestCases, &testCases); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid test cases format")
-		return
-	}
-	if len(testCases) == 0 {
-		writeError(w, http.StatusBadRequest, "No test cases defined for this question")
-		return
-	}
-
 	lang := question.CodingDetails.Language
 	code := req.Code
+
+	isSQL := strings.EqualFold(lang, "sql") || strings.EqualFold(lang, "sqlite")
+	var sqlFiles map[string]string
+	var sqlStdin string
+	if isSQL {
+		payload, files, pErr := service.BuildSQLPayload(question.CodingDetails.TestCases)
+		if pErr != nil {
+			writeError(w, http.StatusBadRequest, "Invalid SQL test cases: "+pErr.Error())
+			return
+		}
+		if payload == "[]" {
+			writeError(w, http.StatusBadRequest, "No test cases defined for this question")
+			return
+		}
+		sqlStdin = payload
+		sqlFiles = files
+	}
+
+	var testCases []map[string]interface{}
+	if !isSQL {
+		if err := json.Unmarshal(question.CodingDetails.TestCases, &testCases); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid test cases format")
+			return
+		}
+		if len(testCases) == 0 {
+			writeError(w, http.StatusBadRequest, "No test cases defined for this question")
+			return
+		}
+	}
 
 	hasFuncField := false
 	for _, tc := range testCases {
@@ -345,7 +397,7 @@ func (c *QuestionController) ValidateQuestion(w http.ResponseWriter, r *http.Req
 		}
 	}
 	codeDefinesFunc := hasFunctionDefinition(code, lang)
-	useFunctionMode := hasFuncField || codeDefinesFunc
+	useFunctionMode := hasFuncField || codeDefinesFunc || isSQL
 
 	sandbox := &service.SandboxService{}
 	totalPassed := 0
@@ -406,36 +458,41 @@ func (c *QuestionController) ValidateQuestion(w http.ResponseWriter, r *http.Req
 			}
 		}
 	} else {
-		detectedFunc := detectFunctionName(code, lang)
 		var sandboxTests []map[string]interface{}
-		for _, tc := range testCases {
-			fn, _ := tc["func"].(string)
-			if fn == "" {
-				fn = detectedFunc
-			}
-			args := tc["args"]
-			if args == nil {
-				if input, ok := tc["input"]; ok {
-					args = input
+		stdinPayload := sqlStdin
+		if !isSQL {
+			detectedFunc := detectFunctionName(code, lang)
+			for _, tc := range testCases {
+				fn, _ := tc["func"].(string)
+				if fn == "" {
+					fn = detectedFunc
 				}
+				args := tc["args"]
+				if args == nil {
+					if input, ok := tc["input"]; ok {
+						args = input
+					}
+				}
+				expected := tc["expected"]
+				if expected == nil {
+					expected = tc["expected_output"]
+				}
+				sandboxTests = append(sandboxTests, map[string]interface{}{
+					"func":     fn,
+					"args":     args,
+					"expected": expected,
+				})
 			}
-			expected := tc["expected"]
-			if expected == nil {
-				expected = tc["expected_output"]
-			}
-			sandboxTests = append(sandboxTests, map[string]interface{}{
-				"func":     fn,
-				"args":     args,
-				"expected": expected,
-			})
+			b, _ := json.Marshal(sandboxTests)
+			stdinPayload = string(b)
 		}
-		sandboxTestsJSON, _ := json.Marshal(sandboxTests)
 
 		resp, execErr := sandbox.Execute(r.Context(), models.ExecuteRequest{
 			Language: lang,
 			Code:     code,
 			Type:     models.ExecutionTypeFunction,
-			Stdin:    string(sandboxTestsJSON),
+			Stdin:    stdinPayload,
+			Files:    sqlFiles,
 		})
 		if execErr != nil {
 			writeError(w, http.StatusInternalServerError, "Execution failed: "+execErr.Error())
@@ -444,8 +501,23 @@ func (c *QuestionController) ValidateQuestion(w http.ResponseWriter, r *http.Req
 
 		harnessOutput := resp.Stdout
 
-		for i, tc := range testCases {
+		// SQL questions keep their tests in the document form; use the
+		// parsed test list for per-test result display.
+		displayTests := testCases
+		if isSQL {
+			var doc struct {
+				Tests []map[string]interface{} `json:"tests"`
+			}
+			if err := json.Unmarshal(question.CodingDetails.TestCases, &doc); err == nil && doc.Tests != nil {
+				displayTests = doc.Tests
+			}
+		}
+
+		for i, tc := range displayTests {
 			expected := tc["expected"]
+			if expected == nil {
+				expected = tc["expected_rows"]
+			}
 			if expected == nil {
 				expected = tc["expected_output"]
 			}
