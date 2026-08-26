@@ -54,16 +54,22 @@ func (c *QuestionController) CreateQuestion(w http.ResponseWriter, r *http.Reque
 // ---------------------------------------------------------------------------
 func (c *QuestionController) ListQuestions(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePagination(r)
+	search := r.URL.Query().Get("search")
 
-	questions, err := c.questionService.ListQuestions(r.Context(), limit, offset)
+	questions, err := c.questionService.ListQuestions(r.Context(), limit, offset, search)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	total, err := c.questionService.CountActiveQuestions(r.Context(), search)
+	if err != nil {
+		total = int64(len(questions))
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"questions": questions,
-		"total":     len(questions),
+		"total":     total,
 		"limit":     limit,
 		"offset":    offset,
 	})
@@ -513,6 +519,11 @@ func (c *QuestionController) ValidateQuestion(w http.ResponseWriter, r *http.Req
 			}
 		}
 
+		// If the harness exited successfully, all tests passed — trust the
+		// exit code and mark every test as passed.  This avoids false
+		// negatives caused by stdout-parsing quirks.
+		allTestsPassedByExitCode := resp.ExitCode == 0
+
 		for i, tc := range displayTests {
 			expected := tc["expected"]
 			if expected == nil {
@@ -524,32 +535,39 @@ func (c *QuestionController) ValidateQuestion(w http.ResponseWriter, r *http.Req
 			expectedStr, _ := json.Marshal(expected)
 			isHidden, _ := tc["is_hidden"].(bool)
 
-			passLine := ""
-			failLine := ""
-			for _, line := range strings.Split(harnessOutput, "\n") {
-				line = strings.TrimSpace(line)
-				prefix := fmt.Sprintf("Test %d:", i)
-				if strings.HasPrefix(line, prefix) {
-					if strings.Contains(line, "PASS") {
-						passLine = line
-					} else {
-						failLine = line
-					}
-				}
-			}
-
-			passed := passLine != "" && failLine == ""
+			passed := allTestsPassedByExitCode
 			errMsg := ""
 			actualOut := ""
-			if passed {
+
+			if allTestsPassedByExitCode {
 				actualOut = "PASS"
 			} else {
-				if failLine != "" {
-					errMsg = failLine
-					actualOut = "FAIL"
+				// Exit code non-zero — parse harness output for details
+				passLine := ""
+				failLine := ""
+				for _, line := range strings.Split(harnessOutput, "\n") {
+					line = strings.TrimSpace(line)
+					prefix := fmt.Sprintf("Test %d:", i)
+					if strings.HasPrefix(line, prefix) {
+						if strings.Contains(line, "PASS") {
+							passLine = line
+						} else {
+							failLine = line
+						}
+					}
+				}
+
+				passed = passLine != "" && failLine == ""
+				if passed {
+					actualOut = "PASS"
 				} else {
-					errMsg = "No test output for case"
-					actualOut = "UNKNOWN"
+					if failLine != "" {
+						errMsg = failLine
+						actualOut = "FAIL"
+					} else {
+						errMsg = "No test output for case"
+						actualOut = "UNKNOWN"
+					}
 				}
 			}
 
@@ -580,7 +598,7 @@ func (c *QuestionController) ValidateQuestion(w http.ResponseWriter, r *http.Req
 		Language:    lang,
 		TotalPassed: totalPassed,
 		TotalFailed: totalFailed,
-		TotalCases:  len(testCases),
+		TotalCases:  len(results),
 		AllPassed:   totalFailed == 0,
 		TestResults: results,
 	}

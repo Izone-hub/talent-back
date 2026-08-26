@@ -28,6 +28,21 @@ func (q *Queries) AssignTagToQuestion(ctx context.Context, arg AssignTagToQuesti
 	return err
 }
 
+const countActiveQuestions = `-- name: CountActiveQuestions :one
+SELECT COUNT(*) FROM questions
+WHERE is_active = true
+  AND ($1::text = '' OR
+    to_tsvector('english', question_text) @@ plainto_tsquery('english', $1) OR
+    EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%' || lower($1) || '%'))
+`
+
+func (q *Queries) CountActiveQuestions(ctx context.Context, dollar_1 string) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveQuestions, dollar_1)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCodingQuestion = `-- name: CreateCodingQuestion :one
 
 INSERT INTO coding_questions (
@@ -298,17 +313,25 @@ func (q *Queries) IncrementQuestionUsage(ctx context.Context, id pgtype.UUID) er
 const listQuestions = `-- name: ListQuestions :many
 SELECT id, question_text, question_type, difficulty, options, correct_answer, explanation, time_limit_seconds, points, tags, created_by, is_active, usage_count, created_at, updated_at FROM questions
 WHERE is_active = true
-ORDER BY difficulty, created_at DESC
+  AND ($3::text = '' OR
+    to_tsvector('english', question_text) @@ plainto_tsquery('english', $3) OR
+    EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%' || lower($3) || '%'))
+ORDER BY
+  CASE WHEN $3::text != '' THEN
+    ts_rank(to_tsvector('english', question_text), plainto_tsquery('english', $3))
+  ELSE 0 END DESC,
+  difficulty, created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListQuestionsParams struct {
-	Limit  int32
-	Offset int32
+	Limit   int32
+	Offset  int32
+	Column3 string
 }
 
 func (q *Queries) ListQuestions(ctx context.Context, arg ListQuestionsParams) ([]Question, error) {
-	rows, err := q.db.Query(ctx, listQuestions, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listQuestions, arg.Limit, arg.Offset, arg.Column3)
 	if err != nil {
 		return nil, err
 	}

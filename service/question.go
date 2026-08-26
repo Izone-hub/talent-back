@@ -114,11 +114,12 @@ func (s *QuestionService) GetQuestion(ctx context.Context, id uuid.UUID) (*model
 	return res, nil
 }
 
-// ListQuestions returns a paginated list of active questions.
-func (s *QuestionService) ListQuestions(ctx context.Context, limit, offset int) ([]models.Question, error) {
+// ListQuestions returns a paginated list of active questions, optionally filtered by search.
+func (s *QuestionService) ListQuestions(ctx context.Context, limit, offset int, search string) ([]models.Question, error) {
 	dbQuestions, err := s.queries.ListQuestions(ctx, database.ListQuestionsParams{
-		Limit:  int32(limit),
-		Offset: int32(offset),
+		Limit:   int32(limit),
+		Offset:  int32(offset),
+		Column3: search,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list questions: %w", err)
@@ -129,6 +130,11 @@ func (s *QuestionService) ListQuestions(ctx context.Context, limit, offset int) 
 		questions = append(questions, dbQuestionToModel(q))
 	}
 	return questions, nil
+}
+
+// CountActiveQuestions returns the total number of active questions, optionally filtered by search.
+func (s *QuestionService) CountActiveQuestions(ctx context.Context, search string) (int64, error) {
+	return s.queries.CountActiveQuestions(ctx, search)
 }
 
 // ---------------------------------------------------------------------------
