@@ -523,6 +523,51 @@ func (q *Queries) GetQuizResults(ctx context.Context, quizAttemptID pgtype.UUID)
 	return i, err
 }
 
+const getUserQuizAnswers = `-- name: GetUserQuizAnswers :many
+SELECT 
+    qa.id, qa.quiz_attempt_id, qa.question_id, qa.user_answer, qa.is_correct, qa.last_saved_at, qa.save_count, qa.time_spent_seconds, qa.code_output, qa.execution_time_ms, qa.memory_used_mb, qa.is_skipped, qa.is_reviewed, qa.created_at, qa.updated_at
+FROM quiz_answers qa
+JOIN quiz_attempts qat ON qa.quiz_attempt_id = qat.id
+WHERE qat.user_id = $1
+ORDER BY qa.created_at DESC
+`
+
+func (q *Queries) GetUserQuizAnswers(ctx context.Context, userID pgtype.UUID) ([]QuizAnswer, error) {
+	rows, err := q.db.Query(ctx, getUserQuizAnswers, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []QuizAnswer
+	for rows.Next() {
+		var i QuizAnswer
+		if err := rows.Scan(
+			&i.ID,
+			&i.QuizAttemptID,
+			&i.QuestionID,
+			&i.UserAnswer,
+			&i.IsCorrect,
+			&i.LastSavedAt,
+			&i.SaveCount,
+			&i.TimeSpentSeconds,
+			&i.CodeOutput,
+			&i.ExecutionTimeMs,
+			&i.MemoryUsedMb,
+			&i.IsSkipped,
+			&i.IsReviewed,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUserQuizStats = `-- name: GetUserQuizStats :many
 
 SELECT 
@@ -615,51 +660,6 @@ func (q *Queries) GetUserQuizStats(ctx context.Context, arg GetUserQuizStatsPara
 			&i.Passed_2,
 			&i.Strengths,
 			&i.Weaknesses,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getUserQuizAnswers = `-- name: GetUserQuizAnswers :many
-SELECT 
-    qa.id, qa.quiz_attempt_id, qa.question_id, qa.user_answer, qa.is_correct, qa.last_saved_at, qa.save_count, qa.time_spent_seconds, qa.code_output, qa.execution_time_ms, qa.memory_used_mb, qa.is_skipped, qa.is_reviewed, qa.created_at, qa.updated_at
-FROM quiz_answers qa
-JOIN quiz_attempts qat ON qa.quiz_attempt_id = qat.id
-WHERE qat.user_id = $1
-ORDER BY qa.created_at DESC
-`
-
-func (q *Queries) GetUserQuizAnswers(ctx context.Context, userID pgtype.UUID) ([]QuizAnswer, error) {
-	rows, err := q.db.Query(ctx, getUserQuizAnswers, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []QuizAnswer
-	for rows.Next() {
-		var i QuizAnswer
-		if err := rows.Scan(
-			&i.ID,
-			&i.QuizAttemptID,
-			&i.QuestionID,
-			&i.UserAnswer,
-			&i.IsCorrect,
-			&i.LastSavedAt,
-			&i.SaveCount,
-			&i.TimeSpentSeconds,
-			&i.CodeOutput,
-			&i.ExecutionTimeMs,
-			&i.MemoryUsedMb,
-			&i.IsSkipped,
-			&i.IsReviewed,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

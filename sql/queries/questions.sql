@@ -14,9 +14,23 @@ SELECT * FROM questions WHERE id = $1;
 -- name: ListQuestions :many
 SELECT * FROM questions
 WHERE is_active = true
-ORDER BY difficulty, created_at DESC
+  AND ($3::text = '' OR
+    to_tsvector('english', question_text) @@ plainto_tsquery('english', $3) OR
+    EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%' || lower($3) || '%'))
+ORDER BY
+  CASE WHEN $3::text != '' THEN
+    ts_rank(to_tsvector('english', question_text), plainto_tsquery('english', $3))
+  ELSE 0 END DESC,
+  difficulty, created_at DESC
 LIMIT $1 OFFSET $2;
 
+-- name: CountActiveQuestions :one
+SELECT COUNT(*) FROM questions
+WHERE is_active = true
+  AND ($1::text = '' OR
+    to_tsvector('english', question_text) @@ plainto_tsquery('english', $1) OR
+    EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%' || lower($1) || '%'));
+j
 -- name: ListQuestionsByDifficulty :many
 SELECT * FROM questions
 WHERE difficulty = $1 AND is_active = true

@@ -635,10 +635,11 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 		return fmt.Errorf("invalid question ID: %w", err)
 	}
 
-	// 2. Fetch the correct answer from the 'questions' table
+	// 2. Fetch the correct answer and question type from the 'questions' table
 	var dbCorrectAnswer *string
 	var timeLimitSeconds int
-	err = s.pool.QueryRow(ctx, "SELECT correct_answer, time_limit_seconds FROM questions WHERE id = $1", questionUUID).Scan(&dbCorrectAnswer, &timeLimitSeconds)
+	var questionType string
+	err = s.pool.QueryRow(ctx, "SELECT correct_answer, time_limit_seconds, question_type::text FROM questions WHERE id = $1", questionUUID).Scan(&dbCorrectAnswer, &timeLimitSeconds, &questionType)
 	if err != nil {
 		return fmt.Errorf("failed to fetch correct answer for validation: %w", err)
 	}
@@ -649,7 +650,22 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 	}
 
 	// 4. Determine if the user's answer is correct
-	isCorrect := dbCorrectAnswer != nil && answer == *dbCorrectAnswer
+	isCodingQuestion := questionType == "coding_challenge"
+	isCorrect := false
+	if isCodingQuestion {
+		// For coding questions, preserve the existing is_correct value
+		// (set by RunQuizCode based on test execution results).
+		// We cannot determine correctness here since correct_answer is NULL.
+		var existingCorrect *bool
+		_ = s.pool.QueryRow(ctx,
+			"SELECT is_correct FROM quiz_answers WHERE quiz_attempt_id = $1 AND question_id = $2",
+			attemptUUID, questionUUID).Scan(&existingCorrect)
+		if existingCorrect != nil {
+			isCorrect = *existingCorrect
+		}
+	} else {
+		isCorrect = dbCorrectAnswer != nil && answer == *dbCorrectAnswer
+	}
 
 	// 5. Perform the INSERT
 	newAnswerID := uuid.New()
