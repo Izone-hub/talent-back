@@ -44,6 +44,7 @@ func (s *JobService) CreateJob(ctx context.Context, userID uuid.UUID, req models
 		Responsibilities: strPtrToPgText(req.Responsibilities),
 		Benefits:         strPtrToPgText(req.Benefits),
 		JobType:          database.JobType(req.JobType),
+		Category:         database.JobCategory(req.Category),
 		ExperienceLevel:  database.JobExperienceLevel(req.ExperienceLevel),
 		Location:         strPtrToPgText(req.Location),
 		RemotePossible:   pgtype.Bool{Bool: req.RemotePossible, Valid: true},
@@ -119,21 +120,24 @@ func (s *JobService) GetPublishedJob(ctx context.Context, jobID uuid.UUID) (*mod
 
 // ListPublishedJobs returns a paginated list of published jobs for the public
 // job board. If userID is provided, it includes the user's application status for each job.
-func (s *JobService) ListPublishedJobs(ctx context.Context, userID *uuid.UUID, limit, offset int) ([]models.Job, error) {
+// category filters by job category; pass empty string for no filter.
+func (s *JobService) ListPublishedJobs(ctx context.Context, userID *uuid.UUID, category string, limit, offset int) ([]models.Job, error) {
 	var dbJobs []database.ListAllPublishedJobsRow
 	var err error
 
 	if userID != nil {
 		dbJobs, err = s.queries.ListAllPublishedJobs(ctx, database.ListAllPublishedJobsParams{
-			Limit:  int32(limit),
-			Offset: int32(offset),
-			UserID: uuidToPgUUID(*userID),
+			Column1: category,
+			Limit:   int32(limit),
+			Offset:  int32(offset),
+			UserID:  uuidToPgUUID(*userID),
 		})
 	} else {
 		dbJobs, err = s.queries.ListAllPublishedJobs(ctx, database.ListAllPublishedJobsParams{
-			Limit:  int32(limit),
-			Offset: int32(offset),
-			UserID: pgtype.UUID{Valid: false},
+			Column1: category,
+			Limit:   int32(limit),
+			Offset:  int32(offset),
+			UserID:  pgtype.UUID{Valid: false},
 		})
 	}
 
@@ -145,11 +149,13 @@ func (s *JobService) ListPublishedJobs(ctx context.Context, userID *uuid.UUID, l
 }
 
 // ListMyJobs returns jobs posted by a specific user (any status), paginated.
-func (s *JobService) ListMyJobs(ctx context.Context, userID uuid.UUID, limit, offset int) ([]models.Job, error) {
+// category filters by job category; pass empty string for no filter.
+func (s *JobService) ListMyJobs(ctx context.Context, userID uuid.UUID, category string, limit, offset int) ([]models.Job, error) {
 	dbJobs, err := s.queries.ListJobsByPoster(ctx, database.ListJobsByPosterParams{
 		PostedBy: uuidToPgUUID(userID),
 		Limit:    int32(limit),
 		Offset:   int32(offset),
+		Column4:  category,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list jobs: %w", err)
@@ -197,6 +203,9 @@ func (s *JobService) UpdateJob(ctx context.Context, userID, jobID uuid.UUID, req
 	}
 	if req.JobType != nil {
 		params.JobType = database.JobType(*req.JobType)
+	}
+	if req.Category != nil {
+		params.Category = database.JobCategory(*req.Category)
 	}
 	if req.ExperienceLevel != nil {
 		params.ExperienceLevel = database.JobExperienceLevel(*req.ExperienceLevel)
@@ -310,6 +319,7 @@ func dbJobToModel(j database.Job) models.Job {
 		Responsibilities:  pgTextToStrPtr(j.Responsibilities),
 		Benefits:          pgTextToStrPtr(j.Benefits),
 		JobType:           models.JobType(j.JobType),
+		Category:          models.JobCategory(j.Category),
 		ExperienceLevel:   models.JobExperienceLevel(j.ExperienceLevel),
 		Location:          pgTextToStrPtr(j.Location),
 		RemotePossible:    j.RemotePossible.Bool,
@@ -486,6 +496,7 @@ func listPublishedJobsRowsToModels(dbJobs []database.ListAllPublishedJobsRow) []
 			Responsibilities:  pgTextToStrPtr(j.Responsibilities),
 			Benefits:          pgTextToStrPtr(j.Benefits),
 			JobType:           models.JobType(j.JobType),
+			Category:          models.JobCategory(j.Category),
 			ExperienceLevel:   models.JobExperienceLevel(j.ExperienceLevel),
 			Location:          pgTextToStrPtr(j.Location),
 			RemotePossible:    j.RemotePossible.Bool,

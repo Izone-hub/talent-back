@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "todos": [
+    {
+      "id": "1a0433f7b47-7107",
+      "title": "Explore the project and summarize its structure",
+      "description": "Read the codebase, understand the stack, and leave a short summary of the project in the description (prefix DONE:).",
+      "status": "todo",
+      "assignee": null,
+      "createdAt": 1787834628935,
+      "updatedAt": 1787834628935
+    }
+  ]
+}

@@ -109,7 +109,7 @@ func (q *Queries) GetJobTags(ctx context.Context, jobID pgtype.UUID) ([]Tag, err
 }
 
 const getJobsByTag = `-- name: GetJobsByTag :many
-SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at
+SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at, j.category
 FROM jobs j
 JOIN job_tags jt ON j.id = jt.job_id
 WHERE jt.tag_id = $1 AND j.status = 'published'
@@ -160,6 +160,7 @@ func (q *Queries) GetJobsByTag(ctx context.Context, arg GetJobsByTagParams) ([]J
 			&i.ApplicationsCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Category,
 		); err != nil {
 			return nil, err
 		}

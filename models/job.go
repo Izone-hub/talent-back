@@ -53,6 +53,25 @@ var validExperienceLevels = map[JobExperienceLevel]bool{
 	JobExperienceLead: true,
 }
 
+// JobCategory represents the role category of a job posting.
+type JobCategory string
+
+const (
+	JobCategoryFullStackDeveloper  JobCategory = "full_stack_developer"
+	JobCategoryWebDeveloper        JobCategory = "web_developer"
+	JobCategoryFrontendDeveloper   JobCategory = "frontend_developer"
+	JobCategoryBackendDeveloper    JobCategory = "backend_developer"
+	JobCategorySystemArchitect     JobCategory = "system_architect"
+	JobCategoryMobileDeveloper     JobCategory = "mobile_developer"
+)
+
+// validJobCategories is the set of allowed job categories.
+var validJobCategories = map[JobCategory]bool{
+	JobCategoryFullStackDeveloper: true, JobCategoryWebDeveloper: true,
+	JobCategoryFrontendDeveloper: true, JobCategoryBackendDeveloper: true,
+	JobCategorySystemArchitect: true, JobCategoryMobileDeveloper: true,
+}
+
 // ---------------------------------------------------------------------------
 // Core Model
 // ---------------------------------------------------------------------------
@@ -70,6 +89,7 @@ type Job struct {
 	Benefits         *string   `json:"benefits,omitempty" db:"benefits"`
 
 	JobType         JobType            `json:"job_type" db:"job_type"`
+	Category        JobCategory        `json:"category" db:"category"`
 	ExperienceLevel JobExperienceLevel `json:"experience_level" db:"experience_level"`
 	Location        *string            `json:"location,omitempty" db:"location"`
 	RemotePossible  bool               `json:"remote_possible" db:"remote_possible"`
@@ -120,6 +140,7 @@ type CreateJobRequest struct {
 	Responsibilities *string            `json:"responsibilities,omitempty"`
 	Benefits         *string            `json:"benefits,omitempty"`
 	JobType          JobType            `json:"job_type"`
+	Category         JobCategory        `json:"category"`
 	ExperienceLevel  JobExperienceLevel `json:"experience_level"`
 	Location         *string            `json:"location,omitempty"`
 	RemotePossible   bool               `json:"remote_possible"`
@@ -146,6 +167,9 @@ func (r *CreateJobRequest) Validate() error {
 	if !validJobTypes[r.JobType] {
 		return fmt.Errorf("invalid job_type: %s", r.JobType)
 	}
+	if !validJobCategories[r.Category] {
+		return fmt.Errorf("invalid category: %s", r.Category)
+	}
 	if !validExperienceLevels[r.ExperienceLevel] {
 		return fmt.Errorf("invalid experience_level: %s", r.ExperienceLevel)
 	}
@@ -166,6 +190,7 @@ type UpdateJobRequest struct {
 	Description     *string             `json:"description,omitempty"`
 	Requirements    *string             `json:"requirements,omitempty"`
 	JobType         *JobType            `json:"job_type,omitempty"`
+	Category        *JobCategory        `json:"category,omitempty"`
 	ExperienceLevel *JobExperienceLevel `json:"experience_level,omitempty"`
 	Location        *string             `json:"location,omitempty"`
 	RemotePossible  *bool               `json:"remote_possible,omitempty"`
@@ -177,6 +202,9 @@ type UpdateJobRequest struct {
 func (r *UpdateJobRequest) Validate() error {
 	if r.JobType != nil && !validJobTypes[*r.JobType] {
 		return fmt.Errorf("invalid job_type: %s", *r.JobType)
+	}
+	if r.Category != nil && !validJobCategories[*r.Category] {
+		return fmt.Errorf("invalid category: %s", *r.Category)
 	}
 	if r.ExperienceLevel != nil && !validExperienceLevels[*r.ExperienceLevel] {
 		return fmt.Errorf("invalid experience_level: %s", *r.ExperienceLevel)
@@ -204,6 +232,7 @@ type JobResponse struct {
 	Responsibilities  *string             `json:"responsibilities,omitempty"`
 	Benefits          *string             `json:"benefits,omitempty"`
 	JobType           JobType             `json:"job_type"`
+	Category          JobCategory         `json:"category"`
 	ExperienceLevel   JobExperienceLevel  `json:"experience_level"`
 	Location          *string             `json:"location,omitempty"`
 	RemotePossible    bool                `json:"remote_possible"`
@@ -244,6 +273,7 @@ func (j *Job) ToResponse() JobResponse {
 		Responsibilities:  j.Responsibilities,
 		Benefits:          j.Benefits,
 		JobType:           j.JobType,
+		Category:          j.Category,
 		ExperienceLevel:   j.ExperienceLevel,
 		Location:          j.Location,
 		RemotePossible:    j.RemotePossible,

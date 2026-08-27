@@ -2,12 +2,12 @@
 INSERT INTO jobs (
     title, company, company_logo, company_website, company_location,
     description, requirements, responsibilities, benefits,
-    job_type, experience_level, location, remote_possible,
+    job_type, category, experience_level, location, remote_possible,
     salary_min, salary_max, salary_currency,
     status, posted_by, expires_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-    $14, $15, $16, $17, $18, $19
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17, $18, $19, $20
 ) RETURNING *;
 
 -- name: GetJobByID :one
@@ -20,6 +20,7 @@ WHERE id = $1 AND status = 'published';
 -- name: ListJobsByPoster :many
 SELECT * FROM jobs
 WHERE posted_by = $1
+  AND ($4::text = '' OR category = $4::job_category)
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
@@ -33,10 +34,11 @@ SELECT j.*,
        ) AS user_application
 FROM jobs j
 LEFT JOIN job_applications ja 
-    ON ja.job_id = j.id AND ja.user_id = $3
+    ON ja.job_id = j.id AND ja.user_id = $4
 WHERE j.status = 'published'
+  AND ($1::text = '' OR j.category = $1::job_category)
 ORDER BY j.published_at DESC
-LIMIT $1 OFFSET $2;
+LIMIT $2 OFFSET $3;
 
 -- name: UpdateJob :one
 UPDATE jobs
@@ -46,13 +48,14 @@ SET
     description = COALESCE($4, description),
     requirements = COALESCE($5, requirements),
     job_type = COALESCE($6, job_type),
-    experience_level = COALESCE($7, experience_level),
-    location = COALESCE($8, location),
-    remote_possible = COALESCE($9, remote_possible),
-    salary_min = COALESCE($10, salary_min),
-    salary_max = COALESCE($11, salary_max),
+    category = COALESCE($7, category),
+    experience_level = COALESCE($8, experience_level),
+    location = COALESCE($9, location),
+    remote_possible = COALESCE($10, remote_possible),
+    salary_min = COALESCE($11, salary_min),
+    salary_max = COALESCE($12, salary_max),
     updated_at = NOW()
-WHERE id = $1 AND posted_by = $12
+WHERE id = $1 AND posted_by = $13
 RETURNING *;
 
 -- Job lifecycle management
@@ -93,7 +96,8 @@ SELECT
 FROM jobs j 
 LEFT JOIN job_applications ja 
     ON ja.job_id = j.id 
-    AND ja.user_id = $3 
-WHERE j.status = 'published' 
+    AND ja.user_id = $4 
+WHERE j.status = 'published'
+  AND ($1::text = '' OR j.category = $1::job_category)
 ORDER BY j.published_at DESC 
-LIMIT $1 OFFSET $2;
+LIMIT $2 OFFSET $3;
