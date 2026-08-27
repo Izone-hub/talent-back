@@ -106,13 +106,14 @@ func (c *JobController) CreateJob(w http.ResponseWriter, r *http.Request) {
 
 func (c *JobController) ListPublishedJobs(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePagination(r)
+	category := r.URL.Query().Get("category")
 
 	var userIDPtr *uuid.UUID
 	if userID, ok := getUserID(r); ok {
 		userIDPtr = &userID
 	}
 
-	jobs, err := c.jobService.ListPublishedJobs(r.Context(), userIDPtr, limit, offset)
+	jobs, err := c.jobService.ListPublishedJobs(r.Context(), userIDPtr, category, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -144,8 +145,9 @@ func (c *JobController) ListMyJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit, offset := parsePagination(r)
+	category := r.URL.Query().Get("category")
 
-	jobs, err := c.jobService.ListMyJobs(r.Context(), userID, limit, offset)
+	jobs, err := c.jobService.ListMyJobs(r.Context(), userID, category, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

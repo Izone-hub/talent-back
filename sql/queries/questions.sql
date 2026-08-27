@@ -30,7 +30,7 @@ WHERE is_active = true
   AND ($1::text = '' OR
     to_tsvector('english', question_text) @@ plainto_tsquery('english', $1) OR
     EXISTS (SELECT 1 FROM unnest(tags) t WHERE lower(t) LIKE '%' || lower($1) || '%'));
-j
+
 -- name: ListQuestionsByDifficulty :many
 SELECT * FROM questions
 WHERE difficulty = $1 AND is_active = true

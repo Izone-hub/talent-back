@@ -17,7 +17,7 @@ SET status = 'archived',
     archived_at = NOW(),
     updated_at = NOW()
 WHERE id = $1 AND posted_by = $2 AND status IN ('published', 'closed')
-RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at
+RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at, category
 `
 
 type ArchiveJobParams struct {
@@ -56,6 +56,7 @@ func (q *Queries) ArchiveJob(ctx context.Context, arg ArchiveJobParams) (Job, er
 		&i.ApplicationsCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
 	)
 	return i, err
 }
@@ -66,7 +67,7 @@ SET status = 'closed',
     closed_at = NOW(),
     updated_at = NOW()
 WHERE id = $1 AND posted_by = $2 AND status = 'published'
-RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at
+RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at, category
 `
 
 type CloseJobParams struct {
@@ -105,6 +106,7 @@ func (q *Queries) CloseJob(ctx context.Context, arg CloseJobParams) (Job, error)
 		&i.ApplicationsCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
 	)
 	return i, err
 }
@@ -113,13 +115,13 @@ const createJob = `-- name: CreateJob :one
 INSERT INTO jobs (
     title, company, company_logo, company_website, company_location,
     description, requirements, responsibilities, benefits,
-    job_type, experience_level, location, remote_possible,
+    job_type, category, experience_level, location, remote_possible,
     salary_min, salary_max, salary_currency,
     status, posted_by, expires_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-    $14, $15, $16, $17, $18, $19
-) RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17, $18, $19, $20
+) RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at, category
 `
 
 type CreateJobParams struct {
@@ -133,6 +135,7 @@ type CreateJobParams struct {
 	Responsibilities pgtype.Text
 	Benefits         pgtype.Text
 	JobType          JobType
+	Category         JobCategory
 	ExperienceLevel  JobExperienceLevel
 	Location         pgtype.Text
 	RemotePossible   pgtype.Bool
@@ -156,6 +159,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		arg.Responsibilities,
 		arg.Benefits,
 		arg.JobType,
+		arg.Category,
 		arg.ExperienceLevel,
 		arg.Location,
 		arg.RemotePossible,
@@ -195,12 +199,13 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.ApplicationsCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
 	)
 	return i, err
 }
 
 const getJobByID = `-- name: GetJobByID :one
-SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at FROM jobs WHERE id = $1
+SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at, category FROM jobs WHERE id = $1
 `
 
 func (q *Queries) GetJobByID(ctx context.Context, id pgtype.UUID) (Job, error) {
@@ -234,12 +239,13 @@ func (q *Queries) GetJobByID(ctx context.Context, id pgtype.UUID) (Job, error) {
 		&i.ApplicationsCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
 	)
 	return i, err
 }
 
 const getPublishedJobByID = `-- name: GetPublishedJobByID :one
-SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at FROM jobs 
+SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at, category FROM jobs 
 WHERE id = $1 AND status = 'published'
 `
 
@@ -274,6 +280,7 @@ func (q *Queries) GetPublishedJobByID(ctx context.Context, id pgtype.UUID) (Job,
 		&i.ApplicationsCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
 	)
 	return i, err
 }
@@ -289,7 +296,7 @@ func (q *Queries) IncrementJobViews(ctx context.Context, id pgtype.UUID) error {
 
 const listAllPublishedJobs = `-- name: ListAllPublishedJobs :many
 SELECT 
-    j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at,
+    j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at, j.category,
     CASE 
         WHEN ja.id IS NOT NULL THEN 'applied'
         ELSE 'not_applied'
@@ -297,16 +304,18 @@ SELECT
 FROM jobs j 
 LEFT JOIN job_applications ja 
     ON ja.job_id = j.id 
-    AND ja.user_id = $3 
-WHERE j.status = 'published' 
+    AND ja.user_id = $4 
+WHERE j.status = 'published'
+  AND ($1::text = '' OR j.category = $1::job_category)
 ORDER BY j.published_at DESC 
-LIMIT $1 OFFSET $2
+LIMIT $2 OFFSET $3
 `
 
 type ListAllPublishedJobsParams struct {
-	Limit  int32
-	Offset int32
-	UserID pgtype.UUID
+	Column1 string
+	Limit   int32
+	Offset  int32
+	UserID  pgtype.UUID
 }
 
 type ListAllPublishedJobsRow struct {
@@ -337,11 +346,17 @@ type ListAllPublishedJobsRow struct {
 	ApplicationsCount pgtype.Int4
 	CreatedAt         pgtype.Timestamp
 	UpdatedAt         pgtype.Timestamp
+	Category          JobCategory
 	ApplicationStatus string
 }
 
 func (q *Queries) ListAllPublishedJobs(ctx context.Context, arg ListAllPublishedJobsParams) ([]ListAllPublishedJobsRow, error) {
-	rows, err := q.db.Query(ctx, listAllPublishedJobs, arg.Limit, arg.Offset, arg.UserID)
+	rows, err := q.db.Query(ctx, listAllPublishedJobs,
+		arg.Column1,
+		arg.Limit,
+		arg.Offset,
+		arg.UserID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -377,6 +392,7 @@ func (q *Queries) ListAllPublishedJobs(ctx context.Context, arg ListAllPublished
 			&i.ApplicationsCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Category,
 			&i.ApplicationStatus,
 		); err != nil {
 			return nil, err
@@ -390,8 +406,9 @@ func (q *Queries) ListAllPublishedJobs(ctx context.Context, arg ListAllPublished
 }
 
 const listJobsByPoster = `-- name: ListJobsByPoster :many
-SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at FROM jobs
+SELECT id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at, category FROM jobs
 WHERE posted_by = $1
+  AND ($4::text = '' OR category = $4::job_category)
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -400,10 +417,16 @@ type ListJobsByPosterParams struct {
 	PostedBy pgtype.UUID
 	Limit    int32
 	Offset   int32
+	Column4  string
 }
 
 func (q *Queries) ListJobsByPoster(ctx context.Context, arg ListJobsByPosterParams) ([]Job, error) {
-	rows, err := q.db.Query(ctx, listJobsByPoster, arg.PostedBy, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listJobsByPoster,
+		arg.PostedBy,
+		arg.Limit,
+		arg.Offset,
+		arg.Column4,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -439,6 +462,7 @@ func (q *Queries) ListJobsByPoster(ctx context.Context, arg ListJobsByPosterPara
 			&i.ApplicationsCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Category,
 		); err != nil {
 			return nil, err
 		}
@@ -451,7 +475,7 @@ func (q *Queries) ListJobsByPoster(ctx context.Context, arg ListJobsByPosterPara
 }
 
 const listPublishedJobs = `-- name: ListPublishedJobs :many
-SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at,
+SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_location, j.description, j.requirements, j.responsibilities, j.benefits, j.job_type, j.experience_level, j.location, j.remote_possible, j.salary_min, j.salary_max, j.salary_currency, j.status, j.published_at, j.closed_at, j.archived_at, j.expires_at, j.posted_by, j.views_count, j.applications_count, j.created_at, j.updated_at, j.category,
        jsonb_build_object(
            'applied', ja.id IS NOT NULL,
            'application_id', ja.id,
@@ -460,16 +484,18 @@ SELECT j.id, j.title, j.company, j.company_logo, j.company_website, j.company_lo
        ) AS user_application
 FROM jobs j
 LEFT JOIN job_applications ja 
-    ON ja.job_id = j.id AND ja.user_id = $3
+    ON ja.job_id = j.id AND ja.user_id = $4
 WHERE j.status = 'published'
+  AND ($1::text = '' OR j.category = $1::job_category)
 ORDER BY j.published_at DESC
-LIMIT $1 OFFSET $2
+LIMIT $2 OFFSET $3
 `
 
 type ListPublishedJobsParams struct {
-	Limit  int32
-	Offset int32
-	UserID pgtype.UUID
+	Column1 string
+	Limit   int32
+	Offset  int32
+	UserID  pgtype.UUID
 }
 
 type ListPublishedJobsRow struct {
@@ -500,11 +526,17 @@ type ListPublishedJobsRow struct {
 	ApplicationsCount pgtype.Int4
 	CreatedAt         pgtype.Timestamp
 	UpdatedAt         pgtype.Timestamp
+	Category          JobCategory
 	UserApplication   []byte
 }
 
 func (q *Queries) ListPublishedJobs(ctx context.Context, arg ListPublishedJobsParams) ([]ListPublishedJobsRow, error) {
-	rows, err := q.db.Query(ctx, listPublishedJobs, arg.Limit, arg.Offset, arg.UserID)
+	rows, err := q.db.Query(ctx, listPublishedJobs,
+		arg.Column1,
+		arg.Limit,
+		arg.Offset,
+		arg.UserID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -540,6 +572,7 @@ func (q *Queries) ListPublishedJobs(ctx context.Context, arg ListPublishedJobsPa
 			&i.ApplicationsCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Category,
 			&i.UserApplication,
 		); err != nil {
 			return nil, err
@@ -558,7 +591,7 @@ SET status = 'published',
     published_at = NOW(),
     updated_at = NOW()
 WHERE id = $1 AND posted_by = $2 AND status = 'draft'
-RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at
+RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at, category
 `
 
 type PublishJobParams struct {
@@ -598,6 +631,7 @@ func (q *Queries) PublishJob(ctx context.Context, arg PublishJobParams) (Job, er
 		&i.ApplicationsCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
 	)
 	return i, err
 }
@@ -610,14 +644,15 @@ SET
     description = COALESCE($4, description),
     requirements = COALESCE($5, requirements),
     job_type = COALESCE($6, job_type),
-    experience_level = COALESCE($7, experience_level),
-    location = COALESCE($8, location),
-    remote_possible = COALESCE($9, remote_possible),
-    salary_min = COALESCE($10, salary_min),
-    salary_max = COALESCE($11, salary_max),
+    category = COALESCE($7, category),
+    experience_level = COALESCE($8, experience_level),
+    location = COALESCE($9, location),
+    remote_possible = COALESCE($10, remote_possible),
+    salary_min = COALESCE($11, salary_min),
+    salary_max = COALESCE($12, salary_max),
     updated_at = NOW()
-WHERE id = $1 AND posted_by = $12
-RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at
+WHERE id = $1 AND posted_by = $13
+RETURNING id, title, company, company_logo, company_website, company_location, description, requirements, responsibilities, benefits, job_type, experience_level, location, remote_possible, salary_min, salary_max, salary_currency, status, published_at, closed_at, archived_at, expires_at, posted_by, views_count, applications_count, created_at, updated_at, category
 `
 
 type UpdateJobParams struct {
@@ -627,6 +662,7 @@ type UpdateJobParams struct {
 	Description     string
 	Requirements    string
 	JobType         JobType
+	Category        JobCategory
 	ExperienceLevel JobExperienceLevel
 	Location        pgtype.Text
 	RemotePossible  pgtype.Bool
@@ -643,6 +679,7 @@ func (q *Queries) UpdateJob(ctx context.Context, arg UpdateJobParams) (Job, erro
 		arg.Description,
 		arg.Requirements,
 		arg.JobType,
+		arg.Category,
 		arg.ExperienceLevel,
 		arg.Location,
 		arg.RemotePossible,
@@ -679,6 +716,7 @@ func (q *Queries) UpdateJob(ctx context.Context, arg UpdateJobParams) (Job, erro
 		&i.ApplicationsCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Category,
 	)
 	return i, err
 }

@@ -130,6 +130,52 @@ func (ns NullAuditAction) Value() (driver.Value, error) {
 	return string(ns.AuditAction), nil
 }
 
+type JobCategory string
+
+const (
+	JobCategoryFullStackDeveloper JobCategory = "full_stack_developer"
+	JobCategoryWebDeveloper       JobCategory = "web_developer"
+	JobCategoryFrontendDeveloper  JobCategory = "frontend_developer"
+	JobCategoryBackendDeveloper   JobCategory = "backend_developer"
+	JobCategorySystemArchitect    JobCategory = "system_architect"
+	JobCategoryMobileDeveloper    JobCategory = "mobile_developer"
+)
+
+func (e *JobCategory) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = JobCategory(s)
+	case string:
+		*e = JobCategory(s)
+	default:
+		return fmt.Errorf("unsupported scan type for JobCategory: %T", src)
+	}
+	return nil
+}
+
+type NullJobCategory struct {
+	JobCategory JobCategory
+	Valid       bool // Valid is true if JobCategory is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullJobCategory) Scan(value interface{}) error {
+	if value == nil {
+		ns.JobCategory, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.JobCategory.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullJobCategory) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.JobCategory), nil
+}
+
 type JobExperienceLevel string
 
 const (
@@ -599,6 +645,7 @@ type Job struct {
 	ApplicationsCount pgtype.Int4
 	CreatedAt         pgtype.Timestamp
 	UpdatedAt         pgtype.Timestamp
+	Category          JobCategory
 }
 
 type JobApplication struct {
