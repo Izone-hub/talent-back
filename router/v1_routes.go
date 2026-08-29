@@ -19,6 +19,7 @@ func V1Routes(
 	intelligenceController *controller.IntelligenceController,
 	savedJobController *controller.SavedJobController,
 	adminController *controller.AdminController,
+	surveyQuestionController *controller.SurveyQuestionController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -52,6 +53,14 @@ func V1Routes(
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/close", authMiddleware.Authenticate(jobController.CloseJob))
 	mux.HandleFunc("PATCH /api/v1/jobs/{id}/archive", authMiddleware.Authenticate(jobController.ArchiveJob))
 	mux.HandleFunc("POST /api/v1/jobs/{id}/apply", authMiddleware.Authenticate(appController.ApplyForJob))
+
+	// -----------------------------------------------------------------------
+	// Survey / Screening question routes
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("PUT /api/v1/jobs/{id}/survey-questions", authMiddleware.Authenticate(surveyQuestionController.UpsertQuestions))
+	mux.HandleFunc("GET /api/v1/jobs/{id}/survey-questions", authMiddleware.OptionalAuthenticate(surveyQuestionController.GetQuestions))
+	mux.HandleFunc("DELETE /api/v1/jobs/{id}/survey-questions/{questionID}", authMiddleware.Authenticate(surveyQuestionController.DeleteQuestion))
+	mux.HandleFunc("POST /api/v1/jobs/{id}/apply-survey", authMiddleware.Authenticate(surveyQuestionController.SubmitSurveyAnswers))
 
 	// -----------------------------------------------------------------------
 	// Application routes

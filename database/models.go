@@ -689,6 +689,16 @@ type JobApplication struct {
 	UpdatedAt              pgtype.Timestamp
 }
 
+type JobSurveyQuestion struct {
+	ID             pgtype.UUID
+	JobID          pgtype.UUID
+	QuestionText   string
+	ExpectedAnswer bool
+	SortOrder      int32
+	CreatedAt      pgtype.Timestamp
+	UpdatedAt      pgtype.Timestamp
+}
+
 type JobTag struct {
 	JobID     pgtype.UUID
 	TagID     pgtype.UUID
