@@ -572,6 +572,16 @@ type CodingQuestion struct {
 	CreatedAt          pgtype.Timestamp
 }
 
+type CompanySetting struct {
+	ID              pgtype.UUID
+	CompanyName     string
+	CompanyLogo     string
+	CompanyWebsite  string
+	CompanyLocation string
+	CreatedAt       pgtype.Timestamp
+	UpdatedAt       pgtype.Timestamp
+}
+
 type CvApplicationUsage struct {
 	CvID          pgtype.UUID
 	ApplicationID pgtype.UUID

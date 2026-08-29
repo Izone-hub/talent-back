@@ -32,6 +32,11 @@ func V1Routes(
 	mux.HandleFunc("GET /api/v1/auth/me", authMiddleware.Authenticate(authController.GetCurrentUser))
 
 	// -----------------------------------------------------------------------
+	// Public stats routes (no auth)
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /api/v1/stats/categories", adminController.GetJobCountsByCategory)
+
+	// -----------------------------------------------------------------------
 	// Job routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/jobs", authMiddleware.OptionalAuthenticate(jobController.ListPublishedJobs))
@@ -181,6 +186,20 @@ func V1Routes(
 	mux.HandleFunc("GET /api/v1/admin/dashboard/recent-activity",
 		authMiddleware.Authenticate(
 			authMiddleware.RequireAdmin(adminController.GetRecentActivity),
+		),
+	)
+
+	// -----------------------------------------------------------------------
+	// Company settings routes
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /api/v1/admin/settings",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.GetCompanySettings),
+		),
+	)
+	mux.HandleFunc("PUT /api/v1/admin/settings",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.UpdateCompanySettings),
 		),
 	)
 
