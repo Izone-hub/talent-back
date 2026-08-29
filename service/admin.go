@@ -49,6 +49,46 @@ func (s *AdminService) GetDashboard(ctx context.Context) (*DashboardStats, error
 	}, nil
 }
 
+// CompanySettings represents the API response for company settings
+
+type CompanySettingsResponse struct {
+	CompanyName     string `json:"company_name"`
+	CompanyLogo     string `json:"company_logo"`
+	CompanyWebsite  string `json:"company_website"`
+	CompanyLocation string `json:"company_location"`
+}
+
+func (s *AdminService) GetCompanySettings(ctx context.Context) (*CompanySettingsResponse, error) {
+	row, err := s.queries.GetCompanySettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &CompanySettingsResponse{
+		CompanyName:     row.CompanyName,
+		CompanyLogo:     row.CompanyLogo,
+		CompanyWebsite:  row.CompanyWebsite,
+		CompanyLocation: row.CompanyLocation,
+	}, nil
+}
+
+func (s *AdminService) UpdateCompanySettings(ctx context.Context, settings CompanySettingsResponse) (*CompanySettingsResponse, error) {
+	row, err := s.queries.UpdateCompanySettings(ctx, database.UpdateCompanySettingsParams{
+		CompanyName:     settings.CompanyName,
+		CompanyLogo:     settings.CompanyLogo,
+		CompanyWebsite:  settings.CompanyWebsite,
+		CompanyLocation: settings.CompanyLocation,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &CompanySettingsResponse{
+		CompanyName:     row.CompanyName,
+		CompanyLogo:     row.CompanyLogo,
+		CompanyWebsite:  row.CompanyWebsite,
+		CompanyLocation: row.CompanyLocation,
+	}, nil
+}
+
 func (s *AdminService) GetRecentActivity(ctx context.Context, limit int32) ([]RecentActivityItem, error) {
 	rows, err := s.queries.GetRecentActivity(ctx, limit)
 	if err != nil {
@@ -71,6 +111,28 @@ func (s *AdminService) GetRecentActivity(ctx context.Context, limit int32) ([]Re
 			Status:         string(r.Status),
 			SubmittedAt:    submittedAt,
 			JobTitle:       r.JobTitle,
+		})
+	}
+	return items, nil
+}
+
+// CategoryJobCount represents a category with its job count for the public home page.
+
+type CategoryJobCount struct {
+	Category string `json:"category"`
+	JobCount int32  `json:"job_count"`
+}
+
+func (s *AdminService) GetJobCountsByCategory(ctx context.Context) ([]CategoryJobCount, error) {
+	rows, err := s.queries.GetJobCountsByCategory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]CategoryJobCount, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, CategoryJobCount{
+			Category: string(r.Category),
+			JobCount: r.JobCount,
 		})
 	}
 	return items, nil

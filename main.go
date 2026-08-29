@@ -73,6 +73,35 @@ func main() {
 		log.Println("Successfully synced question_tags junction table mappings")
 	}
 
+	// Ensure company_settings table exists with a default row
+	_, err = db.Exec(context.Background(), `
+		CREATE TABLE IF NOT EXISTS company_settings (
+		    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		    company_name    TEXT NOT NULL DEFAULT '',
+		    company_logo    TEXT NOT NULL DEFAULT '',
+		    company_website TEXT NOT NULL DEFAULT '',
+		    company_location TEXT NOT NULL DEFAULT '',
+		    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+		    updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		log.Printf("Failed to ensure company_settings table: %v", err)
+	} else {
+		log.Println("company_settings table ensured")
+	}
+	// Insert default row if none exists
+	_, err = db.Exec(context.Background(), `
+		INSERT INTO company_settings (company_name, company_location)
+		SELECT 'iZone Hub', 'Addis Ababa, Ethiopia'
+		WHERE NOT EXISTS (SELECT 1 FROM company_settings LIMIT 1)
+	`)
+	if err != nil {
+		log.Printf("Failed to seed company_settings: %v", err)
+	} else {
+		log.Println("company_settings default row ensured")
+	}
+
 	// Initialize services
 	githubService := service.NewGithubService(&cfg)
 	authService := service.NewAuthService(&cfg, githubService, db)
