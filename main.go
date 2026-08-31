@@ -136,6 +136,8 @@ func main() {
 	adminController := controller.NewAdminController(
 		service.NewAdminService(db),
 	)
+	surveyQuestionService := service.NewSurveyQuestionService(db)
+	surveyQuestionController := controller.NewSurveyQuestionController(surveyQuestionService, jobService)
 
 	// Create router
 	handler := router.NewRouter(
@@ -150,6 +152,7 @@ func main() {
 		intelligenceController,
 		savedJobController,
 		adminController,
+		surveyQuestionController,
 		authMiddleware,
 	)
 

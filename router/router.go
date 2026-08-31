@@ -22,6 +22,7 @@ func NewRouter(
 	intelligenceController *controller.IntelligenceController,
 	savedJobController *controller.SavedJobController,
 	adminController *controller.AdminController,
+	surveyQuestionController *controller.SurveyQuestionController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
@@ -78,6 +79,7 @@ func NewRouter(
 		intelligenceController,
 		savedJobController,
 		adminController,
+		surveyQuestionController,
 		authMiddleware,
 	)
 
