@@ -28,6 +28,10 @@ type Config struct {
 
 	// Server
 	Port string `mapstructure:"PORT"`
+
+	// Talent Analyzer (AI service)
+	AnalyzerURL         string `mapstructure:"ANALYZER_URL"`
+	InternalServiceToken string `mapstructure:"INTERNAL_SERVICE_TOKEN"`
 }
 
 // Helper method to get admin usernames as slice

@@ -67,3 +67,11 @@ FROM tags t
 JOIN job_tags jt ON t.id = jt.tag_id
 WHERE jt.job_id = ANY($1::uuid[])
 ORDER BY t.category, t.name;
+
+-- name: GetQuestionsByTagID :many
+SELECT q.id, q.question_text, q.question_type, q.difficulty, q.options, q.correct_answer, q.explanation, q.time_limit_seconds, q.points, q.tags, q.created_by, q.is_active, q.usage_count, q.created_at, q.updated_at
+FROM questions q
+JOIN tags t ON t.id = $1
+WHERE LOWER(t.name) = ANY(SELECT LOWER(unnest(q.tags))) AND q.is_active = true
+ORDER BY q.difficulty, q.created_at DESC
+LIMIT $2 OFFSET $3;

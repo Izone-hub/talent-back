@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     remote_possible BOOLEAN DEFAULT false,
     salary_min INTEGER,
     salary_max INTEGER,
-    salary_currency VARCHAR(3) DEFAULT 'USD',
+    salary_currency VARCHAR(3) DEFAULT 'ETB',
     
     -- Status and lifecycle
     status job_status NOT NULL DEFAULT 'draft',

@@ -101,6 +101,7 @@ func V1Routes(
 	mux.HandleFunc("POST /api/v1/tags/assign", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.AssignTagToJob)))
 	mux.HandleFunc("POST /api/v1/tags/remove", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.RemoveTagFromJob)))
 	mux.HandleFunc("GET /api/v1/tags/{id}/jobs", authMiddleware.Authenticate(tagController.GetTagJobs))
+	mux.HandleFunc("GET /api/v1/tags/{id}/questions", authMiddleware.Authenticate(tagController.GetTagQuestions))
 	mux.HandleFunc("GET /api/v1/jobs/{id}/tags", authMiddleware.Authenticate(tagController.GetJobTags))
 
 	// -----------------------------------------------------------------------
@@ -117,9 +118,9 @@ func V1Routes(
 
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.DeleteQuestion)))
 
-	mux.HandleFunc("POST /api/v1/questions/{id}/test", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.TestQuestion)))
+	mux.HandleFunc("POST /api/v1/questions/{id}/test", authMiddleware.Authenticate(questionController.TestQuestion))
 
-	mux.HandleFunc("POST /api/v1/questions/{id}/validate", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.ValidateQuestion)))
+	mux.HandleFunc("POST /api/v1/questions/{id}/validate", authMiddleware.Authenticate(questionController.ValidateQuestion))
 
 	// -----------------------------------------------------------------------
 	// Quiz routes

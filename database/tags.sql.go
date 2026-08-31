@@ -172,6 +172,57 @@ func (q *Queries) GetJobsByTag(ctx context.Context, arg GetJobsByTagParams) ([]J
 	return items, nil
 }
 
+const getQuestionsByTagID = `-- name: GetQuestionsByTagID :many
+SELECT q.id, q.question_text, q.question_type, q.difficulty, q.options, q.correct_answer, q.explanation, q.time_limit_seconds, q.points, q.tags, q.created_by, q.is_active, q.usage_count, q.created_at, q.updated_at
+FROM questions q
+JOIN tags t ON t.id = $1
+WHERE LOWER(t.name) = ANY(SELECT LOWER(unnest(q.tags))) AND q.is_active = true
+ORDER BY q.difficulty, q.created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type GetQuestionsByTagIDParams struct {
+	ID     pgtype.UUID
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) GetQuestionsByTagID(ctx context.Context, arg GetQuestionsByTagIDParams) ([]Question, error) {
+	rows, err := q.db.Query(ctx, getQuestionsByTagID, arg.ID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Question
+	for rows.Next() {
+		var i Question
+		if err := rows.Scan(
+			&i.ID,
+			&i.QuestionText,
+			&i.QuestionType,
+			&i.Difficulty,
+			&i.Options,
+			&i.CorrectAnswer,
+			&i.Explanation,
+			&i.TimeLimitSeconds,
+			&i.Points,
+			&i.Tags,
+			&i.CreatedBy,
+			&i.IsActive,
+			&i.UsageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTagByID = `-- name: GetTagByID :one
 SELECT id, name, category, description, color, created_at FROM tags WHERE id = $1
 `

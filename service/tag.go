@@ -135,6 +135,24 @@ func (s *TagService) GetTagJobs(ctx context.Context, tagID uuid.UUID, limit, off
 	return dbJobsToModels(dbJobs), nil
 }
 
+// GetTagQuestions retrieves all active questions linked to a specific tag via the tags array column.
+func (s *TagService) GetTagQuestions(ctx context.Context, tagID uuid.UUID, limit, offset int32) ([]models.Question, error) {
+	pgID := pgtype.UUID{Bytes: tagID, Valid: true}
+	dbQuestions, err := s.db.GetQuestionsByTagID(ctx, database.GetQuestionsByTagIDParams{
+		ID:     pgID,
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	questions := make([]models.Question, 0, len(dbQuestions))
+	for _, q := range dbQuestions {
+		questions = append(questions, dbQuestionToModel(q))
+	}
+	return questions, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

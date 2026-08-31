@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS job_applications (
     -- Application details
     cover_letter TEXT,
     proposed_salary INTEGER,           -- Expected salary
-    proposed_salary_currency VARCHAR(3) DEFAULT 'USD',
+    proposed_salary_currency VARCHAR(3) DEFAULT 'ETB',
     availability_date TIMESTAMP,
     portfolio_url VARCHAR(500),         -- Personal website/portfolio
     linkedin_url VARCHAR(500),
