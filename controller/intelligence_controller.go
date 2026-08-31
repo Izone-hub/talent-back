@@ -22,13 +22,43 @@ import (
 type IntelligenceController struct {
 	githubService *service.GithubService
 	queries       *database.Queries
+	analyzerURL   string
+	internalToken string
 }
 
-func NewIntelligenceController(githubService *service.GithubService, db database.DBTX) *IntelligenceController {
+func NewIntelligenceController(githubService *service.GithubService, db database.DBTX, analyzerURL, internalToken string) *IntelligenceController {
+	if analyzerURL == "" {
+		analyzerURL = "http://localhost:8000"
+	}
 	return &IntelligenceController{
 		githubService: githubService,
 		queries:       database.New(db),
+		analyzerURL:   strings.TrimSuffix(analyzerURL, "/"),
+		internalToken: internalToken,
 	}
+}
+
+// getAnalyzerURL returns the base URL of the Talent Analyzer service.
+func (c *IntelligenceController) getAnalyzerURL() string {
+	return c.analyzerURL
+}
+
+// getInternalToken returns the shared secret for internal service auth.
+func (c *IntelligenceController) getInternalToken() string {
+	return c.internalToken
+}
+
+// newAnalyzerRequest creates an HTTP request to the Analyzer with the
+// internal service token header attached.
+func (c *IntelligenceController) newAnalyzerRequest(method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	if token := c.getInternalToken(); token != "" {
+		req.Header.Set("X-Internal-Service-Token", token)
+	}
+	return req, nil
 }
 
 // --- Response types ---
@@ -273,13 +303,16 @@ func (c *IntelligenceController) AnalyzeCV(w http.ResponseWriter, r *http.Reques
 	}
 	mp.Close()
 
-	analyzerURL := os.Getenv("ANALYZER_URL")
-	if analyzerURL == "" {
-		analyzerURL = "http://localhost:8000/analyze-cv"
-	}
+	analyzerURL := c.getAnalyzerURL() + "/analyze-cv"
 
 	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Post(analyzerURL, mp.FormDataContentType(), &buf)
+	req, err := c.newAnalyzerRequest(http.MethodPost, analyzerURL, &buf)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create request")
+		return
+	}
+	req.Header.Set("Content-Type", mp.FormDataContentType())
+	resp, err := client.Do(req)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach analysis service: %v", err))
 		return
@@ -358,14 +391,16 @@ func (c *IntelligenceController) GenerateJobDescription(w http.ResponseWriter, r
 
 	payload, _ := json.Marshal(req)
 
-	analyzerURL := os.Getenv("ANALYZER_URL")
-	if analyzerURL == "" {
-		analyzerURL = "http://localhost:8000"
-	}
-	url := strings.TrimSuffix(analyzerURL, "/analyze-cv") + "/generate-job-description"
+	url := c.getAnalyzerURL() + "/generate-job-description"
 
 	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+	httpReq, err := c.newAnalyzerRequest(http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create request")
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach AI service: %v", err))
 		return
@@ -399,14 +434,16 @@ func (c *IntelligenceController) GenerateJobDescriptionPublic(w http.ResponseWri
 
 	payload, _ := json.Marshal(req)
 
-	analyzerURL := os.Getenv("ANALYZER_URL")
-	if analyzerURL == "" {
-		analyzerURL = "http://localhost:8000"
-	}
-	url := strings.TrimSuffix(analyzerURL, "/analyze-cv") + "/generate-job-description"
+	url := c.getAnalyzerURL() + "/generate-job-description"
 
 	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+	httpReq, err := c.newAnalyzerRequest(http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create request")
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach AI service: %v", err))
 		return
@@ -441,14 +478,16 @@ func (c *IntelligenceController) GenerateQuestions(w http.ResponseWriter, r *htt
 
 	payload, _ := json.Marshal(req)
 
-	analyzerURL := os.Getenv("ANALYZER_URL")
-	if analyzerURL == "" {
-		analyzerURL = "http://localhost:8000"
-	}
-	url := strings.TrimSuffix(analyzerURL, "/analyze-cv") + "/generate-questions"
+	url := c.getAnalyzerURL() + "/generate-questions"
 
 	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+	httpReq, err := c.newAnalyzerRequest(http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create request")
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach AI service: %v", err))
 		return
@@ -483,14 +522,16 @@ func (c *IntelligenceController) GenerateQuestionsPublic(w http.ResponseWriter, 
 
 	payload, _ := json.Marshal(req)
 
-	analyzerURL := os.Getenv("ANALYZER_URL")
-	if analyzerURL == "" {
-		analyzerURL = "http://localhost:8000"
-	}
-	url := strings.TrimSuffix(analyzerURL, "/analyze-cv") + "/generate-questions"
+	url := c.getAnalyzerURL() + "/generate-questions"
 
 	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+	httpReq, err := c.newAnalyzerRequest(http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create request")
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to reach AI service: %v", err))
 		return

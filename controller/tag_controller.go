@@ -123,6 +123,30 @@ func (c *TagController) GetJobTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tags)
 }
 
+// GetTagQuestions returns all active questions linked to a specific tag.
+func (c *TagController) GetTagQuestions(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	tagID, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid tag ID format")
+		return
+	}
+
+	limit, offset := parsePagination(r)
+
+	questions, err := c.tagService.GetTagQuestions(r.Context(), tagID, int32(limit), int32(offset))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"questions": questions,
+		"limit":     limit,
+		"offset":    offset,
+	})
+}
+
 func (c *TagController) RemoveTagFromJob(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		JobID   uuid.UUID `json:"job_id"`

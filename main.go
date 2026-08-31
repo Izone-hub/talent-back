@@ -120,7 +120,7 @@ func main() {
 	tagController := controller.NewTagController(tagService)
 	questionController := controller.NewQuestionController(questionService)
 	sandboxController := controller.NewSandboxController(sandboxService)
-	intelligenceController := controller.NewIntelligenceController(githubService, db)
+	intelligenceController := controller.NewIntelligenceController(githubService, db, cfg.AnalyzerURL, cfg.InternalServiceToken)
 
 	// Initialize middleware
 	authMiddleware := middleware.NewAuthMiddleware(authService)
