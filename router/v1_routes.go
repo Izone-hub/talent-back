@@ -195,7 +195,7 @@ func V1Routes(
 	)
 	mux.HandleFunc("GET /api/v1/admin/dashboard/recent-activity",
 		authMiddleware.Authenticate(
-			authMiddleware.RequireAdmin(adminController.GetRecentActivity),
+			authMiddleware.RequireAdmin(adminController.GetRecentActivityPage),
 		),
 	)
 
