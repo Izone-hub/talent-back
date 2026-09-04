@@ -20,3 +20,21 @@ JOIN jobs j ON ja.job_id = j.id
 WHERE ja.submitted_at IS NOT NULL
 ORDER BY ja.submitted_at DESC
 LIMIT $1;
+
+-- name: GetRecentActivityPage :many
+SELECT
+    u.github_username,
+    u.avatar_url,
+    ja.status,
+    ja.submitted_at,
+    j.title AS job_title
+FROM job_applications ja
+JOIN users u ON ja.user_id = u.id
+JOIN jobs j ON ja.job_id = j.id
+WHERE ja.submitted_at IS NOT NULL
+ORDER BY ja.submitted_at DESC
+LIMIT $1 OFFSET $2;
+
+-- name: CountRecentActivity :one
+SELECT COUNT(*)::int FROM job_applications
+WHERE submitted_at IS NOT NULL;

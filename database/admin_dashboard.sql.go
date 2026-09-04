@@ -92,3 +92,55 @@ func (q *Queries) GetRecentActivity(ctx context.Context, limit int32) ([]GetRece
 	}
 	return items, nil
 }
+
+const getRecentActivityPage = `-- name: GetRecentActivityPage :many
+SELECT
+    u.github_username,
+    u.avatar_url,
+    ja.status,
+    ja.submitted_at,
+    j.title AS job_title
+FROM job_applications ja
+JOIN users u ON ja.user_id = u.id
+JOIN jobs j ON ja.job_id = j.id
+WHERE ja.submitted_at IS NOT NULL
+ORDER BY ja.submitted_at DESC
+LIMIT $1 OFFSET $2
+`
+
+func (q *Queries) GetRecentActivityPage(ctx context.Context, limit int32, offset int32) ([]GetRecentActivityRow, error) {
+	rows, err := q.db.Query(ctx, getRecentActivityPage, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetRecentActivityRow
+	for rows.Next() {
+		var i GetRecentActivityRow
+		if err := rows.Scan(
+			&i.GithubUsername,
+			&i.AvatarUrl,
+			&i.Status,
+			&i.SubmittedAt,
+			&i.JobTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countRecentActivity = `-- name: CountRecentActivity :one
+SELECT COUNT(*)::int FROM job_applications
+WHERE submitted_at IS NOT NULL
+`
+
+func (q *Queries) CountRecentActivity(ctx context.Context) (int32, error) {
+	var count int32
+	err := q.db.QueryRow(ctx, countRecentActivity).Scan(&count)
+	return count, err
+}

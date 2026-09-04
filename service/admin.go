@@ -26,6 +26,22 @@ type DashboardStats struct {
 	NewApplicationsToday int32 `json:"new_applications_today"`
 }
 
+// RecentActivityPagination contains pagination info for recent activity.
+type RecentActivityPagination struct {
+	Limit   int32 `json:"limit"`
+	Offset  int32 `json:"offset"`
+	HasMore bool  `json:"has_more"`
+	Total   int32 `json:"total"`
+}
+
+// DashboardResponse is the combined response for the admin dashboard endpoint.
+// It contains both statistics and recent activity in a single response.
+type DashboardResponse struct {
+	Stats                   DashboardStats          `json:"stats"`
+	RecentActivity          []RecentActivityItem    `json:"recent_activity"`
+	RecentActivityPagination *RecentActivityPagination `json:"recent_activity_pagination,omitempty"`
+}
+
 type RecentActivityItem struct {
 	GithubUsername string  `json:"github_username"`
 	AvatarURL      *string `json:"avatar_url"`
@@ -34,18 +50,43 @@ type RecentActivityItem struct {
 	JobTitle       string  `json:"job_title"`
 }
 
-func (s *AdminService) GetDashboard(ctx context.Context) (*DashboardStats, error) {
+func (s *AdminService) GetDashboard(ctx context.Context) (*DashboardResponse, error) {
 	stats, err := s.queries.GetDashboardStats(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &DashboardStats{
-		TotalUsers:           stats.TotalUsers,
-		ActiveJobs:           stats.ActiveJobs,
-		PendingApplications:  stats.PendingApplications,
-		TotalApplications:    stats.TotalApplications,
-		NewUsersToday:        stats.NewUsersToday,
-		NewApplicationsToday: stats.NewApplicationsToday,
+
+	// Fetch first page of recent activity (10 items)
+	const defaultLimit = int32(10)
+	activity, err := s.GetRecentActivity(ctx, defaultLimit)
+	if err != nil {
+		activity = []RecentActivityItem{}
+	}
+
+	// Get total count for pagination info
+	total, err := s.queries.CountRecentActivity(ctx)
+	if err != nil {
+		total = 0
+	}
+
+	hasMore := total > defaultLimit
+
+	return &DashboardResponse{
+		Stats: DashboardStats{
+			TotalUsers:           stats.TotalUsers,
+			ActiveJobs:           stats.ActiveJobs,
+			PendingApplications:  stats.PendingApplications,
+			TotalApplications:    stats.TotalApplications,
+			NewUsersToday:        stats.NewUsersToday,
+			NewApplicationsToday: stats.NewApplicationsToday,
+		},
+		RecentActivity: activity,
+		RecentActivityPagination: &RecentActivityPagination{
+			Limit:   defaultLimit,
+			Offset:  0,
+			HasMore: hasMore,
+			Total:   total,
+		},
 	}, nil
 }
 
@@ -94,6 +135,24 @@ func (s *AdminService) GetRecentActivity(ctx context.Context, limit int32) ([]Re
 	if err != nil {
 		return nil, err
 	}
+	return s.mapActivityRows(rows), nil
+}
+
+// GetRecentActivityPage returns a paginated slice of recent activity items.
+func (s *AdminService) GetRecentActivityPage(ctx context.Context, limit, offset int32) ([]RecentActivityItem, error) {
+	rows, err := s.queries.GetRecentActivityPage(ctx, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return s.mapActivityRows(rows), nil
+}
+
+// CountRecentActivity returns the total number of recent activity items.
+func (s *AdminService) CountRecentActivity(ctx context.Context) (int32, error) {
+	return s.queries.CountRecentActivity(ctx)
+}
+
+func (s *AdminService) mapActivityRows(rows []database.GetRecentActivityRow) []RecentActivityItem {
 	items := make([]RecentActivityItem, 0, len(rows))
 	for _, r := range rows {
 		var avatarURL *string
@@ -113,7 +172,7 @@ func (s *AdminService) GetRecentActivity(ctx context.Context, limit int32) ([]Re
 			JobTitle:       r.JobTitle,
 		})
 	}
-	return items, nil
+	return items
 }
 
 // CategoryJobCount represents a category with its job count for the public home page.
