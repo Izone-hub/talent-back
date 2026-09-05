@@ -887,6 +887,8 @@ type User struct {
 	TwitterUsername      pgtype.Text
 	TopLanguages         []string
 	ContributionCount    pgtype.Int4
+	AcceptanceJobID      uuid.UUID
+	Categories           []string
 }
 
 type UserSkillProfile struct {

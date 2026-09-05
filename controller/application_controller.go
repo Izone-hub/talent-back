@@ -86,6 +86,25 @@ func (c *ApplicationController) GetJobApplications(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, apps)
 }
 
+// GetUserApplications lists every application a user has submitted across all
+// jobs (admin only). Used by the admin user detail page.
+func (c *ApplicationController) GetUserApplications(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	apps, err := c.appService.GetUserApplications(r.Context(), userID, 100, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apps)
+}
+
 func (c *ApplicationController) GetApplicationDetail(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	appID, err := uuid.Parse(idStr)
