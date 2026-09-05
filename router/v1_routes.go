@@ -193,9 +193,59 @@ func V1Routes(
 			authMiddleware.RequireAdmin(adminController.GetDashboard),
 		),
 	)
+	// Admin-only: paginated list of all registered users (applicants) with
+	// their profile info. Sensitive fields (GitHub access token) are stripped.
+	mux.HandleFunc("GET /api/v1/admin/users",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.ListUsers),
+		),
+	)
+	// Admin-only: accepted-user category cards for the Users page, and an
+	// idempotent backfill of categories for users accepted before the column
+	// existed.
+	mux.HandleFunc("GET /api/v1/admin/users/categories",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.GetUserCategoryCounts),
+		),
+	)
+	mux.HandleFunc("POST /api/v1/admin/users/reindex-categories",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.ReindexUserCategories),
+		),
+	)
+	// Admin-only: single user + their activity (applications, quizzes, CV) for
+	// the admin user detail page.
+	mux.HandleFunc("GET /api/v1/admin/users/{id}",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.GetUser),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/users/{id}/applications",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(appController.GetUserApplications),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/users/{id}/cv",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(cvController.ListUserCVVersions),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/users/{id}/cv/{cvID}/download",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(cvController.DownloadUserCV),
+		),
+	)
 	mux.HandleFunc("GET /api/v1/admin/dashboard/recent-activity",
 		authMiddleware.Authenticate(
 			authMiddleware.RequireAdmin(adminController.GetRecentActivityPage),
+		),
+	)
+	// Aggregate endpoint for the admin Applications page: all published jobs
+	// with their application counters, summary stats, and quiz-completed
+	// candidates in one round trip (replaces per-job count requests).
+	mux.HandleFunc("GET /api/v1/admin/applications/overview",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.GetApplicationsOverview),
 		),
 	)
 

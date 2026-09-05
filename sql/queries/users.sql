@@ -63,6 +63,9 @@ SELECT * FROM users
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
+-- name: CountUsers :one
+SELECT COUNT(*) FROM users;
+
 -- name: UpdateUserRole :one
 UPDATE users 
 SET role = $2, updated_at = NOW()
@@ -80,6 +83,44 @@ SELECT EXISTS(
     WHERE github_id = $1 AND role = 'admin'
 ) as is_admin;
 
+-- name: SetUserAcceptanceJob :one
+UPDATE users
+SET acceptance_job_id = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteUser :exec
 DELETE FROM users 
 WHERE github_id = $1;
+
+-- name: SetUserCategories :exec
+UPDATE users
+SET categories = $2, updated_at = NOW()
+WHERE id = $1;
+
+-- name: ListAcceptedUsers :many
+SELECT * FROM users
+WHERE acceptance_job_id IS NOT NULL
+ORDER BY created_at DESC;
+
+-- name: ListUsersByCategory :many
+-- Accepted users whose categories overlap the given category (admin view).
+SELECT * FROM users
+WHERE acceptance_job_id IS NOT NULL
+  AND categories @> ARRAY[$1::text]
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: CountUsersByCategory :one
+SELECT COUNT(*) FROM users
+WHERE acceptance_job_id IS NOT NULL
+  AND categories @> ARRAY[$1::text];
+
+-- name: CountAcceptedUsersByCategory :many
+-- Per-category counts of accepted users for the admin category cards. A user
+-- with several categories is counted once per category.
+SELECT unnest(categories)::text AS category, COUNT(*)::bigint AS count
+FROM users
+WHERE acceptance_job_id IS NOT NULL
+GROUP BY unnest(categories)
+ORDER BY count DESC;
