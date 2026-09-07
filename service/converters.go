@@ -95,3 +95,13 @@ func pgTimestampToTimePtr(t pgtype.Timestamp) *time.Time {
 	}
 	return &t.Time
 }
+
+// pgTimestampToTimePtrStr converts a pgtype.Timestamp to a *string formatted
+// in RFC3339 (used for JSON payloads that carry timestamps as strings).
+func pgTimestampToTimePtrStr(t pgtype.Timestamp) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.Time.Format(time.RFC3339)
+	return &s
+}

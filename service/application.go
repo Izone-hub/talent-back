@@ -56,6 +56,12 @@ func (s *ApplicationService) ApplyForJob(ctx context.Context, jobID uuid.UUID, c
 		return database.JobApplication{}, fmt.Errorf("failed to retrieve user details: %w", err)
 	}
 
+	// A user who has already been accepted for a job can no longer apply
+	// for new positions, enforced server-side so it cannot be bypassed.
+	if user.AcceptanceJobID != uuid.Nil {
+		return database.JobApplication{}, fmt.Errorf("you have already been accepted for a job and can no longer apply for new positions")
+	}
+
 	now := time.Now()
 	var pgNow pgtype.Timestamp
 	pgNow.Time = now
@@ -108,17 +114,6 @@ func (s *ApplicationService) ApplyForJob(ctx context.Context, jobID uuid.UUID, c
 	return app, nil
 }
 
-func (s *ApplicationService) GetMyApplications(ctx context.Context, userID uuid.UUID) ([]database.ListApplicationsByUserRow, error) {
-	var pgUserID pgtype.UUID
-	copy(pgUserID.Bytes[:], userID[:])
-	pgUserID.Valid = true
-
-	return s.queries.ListApplicationsByUser(ctx, database.ListApplicationsByUserParams{
-		UserID: pgUserID,
-		Limit:  100,
-		Offset: 0,
-	})
-}
 
 func (s *ApplicationService) GetApplicationsForJob(ctx context.Context, jobID uuid.UUID, limit, offset int32) ([]database.ListApplicationsByJobRow, error) {
 	var pgJobID pgtype.UUID
@@ -167,18 +162,92 @@ func (s *ApplicationService) MarkInterviewed(ctx context.Context, appID uuid.UUI
 	return s.queries.MarkInterviewed(ctx, pgAppID)
 }
 
-func (s *ApplicationService) AcceptApplication(ctx context.Context, appID uuid.UUID) (database.JobApplication, error) {
+// AcceptApplication marks the applicant as accepted for the job referenced by
+// the application. Acceptance is a user-level relationship and is recorded in
+// exactly one place: users.acceptance_job_id. job_applications.status is NOT
+// touched here - it stays pure application-process history (the application
+// keeps its previous lifecycle status, e.g. quiz_completed or interviewed).
+func (s *ApplicationService) AcceptApplication(ctx context.Context, appID uuid.UUID) (database.GetApplicationWithDetailsRow, error) {
 	var pgAppID pgtype.UUID
 	copy(pgAppID.Bytes[:], appID[:])
 	pgAppID.Valid = true
 
-	return s.queries.AcceptApplication(ctx, pgAppID)
+	app, err := s.queries.GetApplicationWithDetails(ctx, pgAppID)
+	if err != nil {
+		return database.GetApplicationWithDetailsRow{}, fmt.Errorf("application not found: %w", err)
+	}
+
+	jobID := pgUUIDToUUID(app.JobID)
+	if jobID == uuid.Nil {
+		return database.GetApplicationWithDetailsRow{}, fmt.Errorf("application has no job reference")
+	}
+
+	// A user may only hold a single accepted job: refuse to accept when the
+	// applicant has already accepted a *different* job. Accepting again for the
+	// same job is idempotent (re-setting the same acceptance_job_id).
+	if app.AcceptanceJobID != uuid.Nil && app.AcceptanceJobID != jobID {
+		return database.GetApplicationWithDetailsRow{}, fmt.Errorf("applicant has already been accepted for another job")
+	}
+
+	if _, err := s.queries.SetUserAcceptanceJob(ctx, database.SetUserAcceptanceJobParams{
+		ID:              app.UserID,
+		AcceptanceJobID: jobID,
+	}); err != nil {
+		return database.GetApplicationWithDetailsRow{}, fmt.Errorf("failed to record accepted job for user: %w", err)
+	}
+
+	// Auto-derive the user's job categories from their GitHub top languages
+	// and store them. Best-effort: acceptance succeeds even if this fails.
+	if err := s.syncUserCategories(ctx, app.UserID); err != nil {
+		fmt.Printf("WARNING: failed to sync user categories: %v\n", err)
+	}
+
+	return app, nil
+}
+
+// syncUserCategories derives the user's job categories from their GitHub top
+// languages and stores them on the users row.
+func (s *ApplicationService) syncUserCategories(ctx context.Context, userID pgtype.UUID) error {
+	user, err := s.queries.GetUserByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to load user for category sync: %w", err)
+	}
+	return s.queries.SetUserCategories(ctx, database.SetUserCategoriesParams{
+		ID:         userID,
+		Categories: deriveCategories(user.TopLanguages),
+	})
+}
+
+// rejectAcceptedApplication is a shared guard: an applicant whose canonical
+// acceptance (users.acceptance_job_id) points at this application's job must
+// not have the application rejected or withdrawn - their accepted state lives
+// on the user record, independent of application status.
+func (s *ApplicationService) rejectAcceptedApplication(ctx context.Context, appRow database.JobApplication) error {
+	if !appRow.UserID.Valid || !appRow.JobID.Valid {
+		return nil
+	}
+	user, err := s.queries.GetUserByID(ctx, appRow.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to load applicant: %w", err)
+	}
+	if user.AcceptanceJobID != uuid.Nil && user.AcceptanceJobID == uuid.UUID(appRow.JobID.Bytes) {
+		return fmt.Errorf("applicant has already been accepted for this job")
+	}
+	return nil
 }
 
 func (s *ApplicationService) RejectApplication(ctx context.Context, appID uuid.UUID, reason, feedback string) (database.JobApplication, error) {
 	var pgAppID pgtype.UUID
 	copy(pgAppID.Bytes[:], appID[:])
 	pgAppID.Valid = true
+
+	appRow, err := s.queries.GetApplicationByID(ctx, pgAppID)
+	if err != nil {
+		return database.JobApplication{}, fmt.Errorf("application not found: %w", err)
+	}
+	if err := s.rejectAcceptedApplication(ctx, appRow); err != nil {
+		return database.JobApplication{}, err
+	}
 
 	return s.queries.RejectApplication(ctx, database.RejectApplicationParams{
 		ID:               pgAppID,
@@ -195,6 +264,18 @@ func (s *ApplicationService) WithdrawApplication(ctx context.Context, appID uuid
 	var pgUserID pgtype.UUID
 	copy(pgUserID.Bytes[:], userID[:])
 	pgUserID.Valid = true
+
+	appRow, err := s.queries.GetApplicationByID(ctx, pgAppID)
+	if err != nil {
+		return database.JobApplication{}, fmt.Errorf("application not found: %w", err)
+	}
+	// Only the owning user may withdraw their own application.
+	if !appRow.UserID.Valid || appRow.UserID.Bytes != pgUserID.Bytes {
+		return database.JobApplication{}, fmt.Errorf("you can only withdraw your own application")
+	}
+	if err := s.rejectAcceptedApplication(ctx, appRow); err != nil {
+		return database.JobApplication{}, err
+	}
 
 	return s.queries.WithdrawApplication(ctx, database.WithdrawApplicationParams{
 		ID:     pgAppID,

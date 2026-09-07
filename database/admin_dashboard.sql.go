@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countRecentActivity = `-- name: CountRecentActivity :one
+SELECT COUNT(*)::int FROM job_applications
+WHERE submitted_at IS NOT NULL
+`
+
+func (q *Queries) CountRecentActivity(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, countRecentActivity)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getDashboardStats = `-- name: GetDashboardStats :one
 SELECT
     (SELECT COUNT(*) FROM users)::int AS total_users,
@@ -108,15 +120,28 @@ ORDER BY ja.submitted_at DESC
 LIMIT $1 OFFSET $2
 `
 
-func (q *Queries) GetRecentActivityPage(ctx context.Context, limit int32, offset int32) ([]GetRecentActivityRow, error) {
-	rows, err := q.db.Query(ctx, getRecentActivityPage, limit, offset)
+type GetRecentActivityPageParams struct {
+	Limit  int32
+	Offset int32
+}
+
+type GetRecentActivityPageRow struct {
+	GithubUsername string
+	AvatarUrl      pgtype.Text
+	Status         ApplicationStatus
+	SubmittedAt    pgtype.Timestamp
+	JobTitle       string
+}
+
+func (q *Queries) GetRecentActivityPage(ctx context.Context, arg GetRecentActivityPageParams) ([]GetRecentActivityPageRow, error) {
+	rows, err := q.db.Query(ctx, getRecentActivityPage, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetRecentActivityRow
+	var items []GetRecentActivityPageRow
 	for rows.Next() {
-		var i GetRecentActivityRow
+		var i GetRecentActivityPageRow
 		if err := rows.Scan(
 			&i.GithubUsername,
 			&i.AvatarUrl,
@@ -132,15 +157,4 @@ func (q *Queries) GetRecentActivityPage(ctx context.Context, limit int32, offset
 		return nil, err
 	}
 	return items, nil
-}
-
-const countRecentActivity = `-- name: CountRecentActivity :one
-SELECT COUNT(*)::int FROM job_applications
-WHERE submitted_at IS NOT NULL
-`
-
-func (q *Queries) CountRecentActivity(ctx context.Context) (int32, error) {
-	var count int32
-	err := q.db.QueryRow(ctx, countRecentActivity).Scan(&count)
-	return count, err
 }

@@ -203,6 +203,65 @@ func (c *CvController) ListCVVersions(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Admin: GET /admin/users/{id}/cv — list a user's CV versions
+// ---------------------------------------------------------------------------
+
+func (c *CvController) ListUserCVVersions(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	limit, offset := parsePagination(r)
+
+	cvs, err := c.cvService.ListCVVersions(r.Context(), userID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	responses := make([]models.CvUploadResponse, 0, len(cvs))
+	for _, cv := range cvs {
+		responses = append(responses, cv.ToResponse())
+	}
+
+	writeJSON(w, http.StatusOK, models.CvVersionListResponse{
+		Versions: responses,
+		Total:    len(responses),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Admin: GET /admin/users/{id}/cv/{cvID}/download — download a user's CV file
+// ---------------------------------------------------------------------------
+
+func (c *CvController) DownloadUserCV(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	cvID, err := uuid.Parse(r.PathValue("cvID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid CV ID")
+		return
+	}
+
+	filePath, fileName, err := c.cvService.DownloadCV(r.Context(), userID, cvID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	// Serve the file with proper headers for PDF download
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+fileName+"\"")
+	http.ServeFile(w, r, filePath)
+}
+
+// ---------------------------------------------------------------------------
 // GET /cv/{id}/download — Download a specific CV file
 // ---------------------------------------------------------------------------
 

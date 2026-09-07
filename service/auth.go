@@ -224,7 +224,18 @@ func dbUserToModel(u database.User) models.User {
 		TwitterUsername:      pgTextToStrPtr(u.TwitterUsername),
 		TopLanguages:         topLangs,
 		ContributionCount:    int(u.ContributionCount.Int32),
+		AcceptanceJobID:      pgUUIDToUUIDPtr(u.AcceptanceJobID),
 	}
+}
+
+// pgUUIDToUUIDPtr converts a google/uuid.UUID to a *uuid.UUID, returning nil
+// when the source UUID is nil (which sqlc uses to represent a NULL uuid column).
+func pgUUIDToUUIDPtr(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	v := id
+	return &v
 }
 
 func (s *AuthService) generateJWT(user *models.User) (string, error) {

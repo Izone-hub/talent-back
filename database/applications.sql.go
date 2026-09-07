@@ -12,51 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const acceptApplication = `-- name: AcceptApplication :one
-UPDATE job_applications
-SET 
-    status = 'accepted',
-    updated_at = NOW()
-WHERE id = $1 AND status IN ('submitted', 'quiz_completed', 'under_review', 'shortlisted', 'interviewed')
-RETURNING id, job_id, user_id, github_username, github_id, applicant_email, applicant_name, applicant_avatar_url, cover_letter, proposed_salary, proposed_salary_currency, availability_date, portfolio_url, linkedin_url, notes, status, submitted_at, reviewed_at, reviewed_by, employer_feedback, rejection_reason, quiz_id, quiz_score, quiz_completed_at, quiz_passed, can_view_ai_summary, created_at, updated_at
-`
-
-func (q *Queries) AcceptApplication(ctx context.Context, id pgtype.UUID) (JobApplication, error) {
-	row := q.db.QueryRow(ctx, acceptApplication, id)
-	var i JobApplication
-	err := row.Scan(
-		&i.ID,
-		&i.JobID,
-		&i.UserID,
-		&i.GithubUsername,
-		&i.GithubID,
-		&i.ApplicantEmail,
-		&i.ApplicantName,
-		&i.ApplicantAvatarUrl,
-		&i.CoverLetter,
-		&i.ProposedSalary,
-		&i.ProposedSalaryCurrency,
-		&i.AvailabilityDate,
-		&i.PortfolioUrl,
-		&i.LinkedinUrl,
-		&i.Notes,
-		&i.Status,
-		&i.SubmittedAt,
-		&i.ReviewedAt,
-		&i.ReviewedBy,
-		&i.EmployerFeedback,
-		&i.RejectionReason,
-		&i.QuizID,
-		&i.QuizScore,
-		&i.QuizCompletedAt,
-		&i.QuizPassed,
-		&i.CanViewAiSummary,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const addEmployerFeedback = `-- name: AddEmployerFeedback :one
 UPDATE job_applications
 SET 
@@ -402,14 +357,15 @@ func (q *Queries) GetApplicationByJobAndUser(ctx context.Context, arg GetApplica
 const getApplicationCountsByJob = `-- name: GetApplicationCountsByJob :one
 SELECT 
     COUNT(*) as total_applications,
-    COUNT(CASE WHEN status = 'submitted' THEN 1 END) as submitted,
-    COUNT(CASE WHEN status = 'quiz_completed' THEN 1 END) as quiz_completed,
-    COUNT(CASE WHEN status = 'under_review' THEN 1 END) as under_review,
-    COUNT(CASE WHEN status = 'shortlisted' THEN 1 END) as shortlisted,
-    COUNT(CASE WHEN status = 'accepted' THEN 1 END) as accepted,
-    COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected
-FROM job_applications
-WHERE job_id = $1
+    COUNT(CASE WHEN ja.status = 'submitted' THEN 1 END) as submitted,
+    COUNT(CASE WHEN ja.status = 'quiz_completed' THEN 1 END) as quiz_completed,
+    COUNT(CASE WHEN ja.status = 'under_review' THEN 1 END) as under_review,
+    COUNT(CASE WHEN ja.status = 'shortlisted' THEN 1 END) as shortlisted,
+    COUNT(CASE WHEN u.acceptance_job_id = ja.job_id THEN 1 END) as accepted,
+    COUNT(CASE WHEN ja.status = 'rejected' THEN 1 END) as rejected
+FROM job_applications ja
+JOIN users u ON u.id = ja.user_id
+WHERE ja.job_id = $1
 `
 
 type GetApplicationCountsByJobRow struct {
@@ -422,6 +378,9 @@ type GetApplicationCountsByJobRow struct {
 	Rejected          int64
 }
 
+// Counts applicants per process state. "accepted" is the number of applicants
+// whose canonical acceptance (users.acceptance_job_id) points at this job,
+// not an application status.
 func (q *Queries) GetApplicationCountsByJob(ctx context.Context, jobID pgtype.UUID) (GetApplicationCountsByJobRow, error) {
 	row := q.db.QueryRow(ctx, getApplicationCountsByJob, jobID)
 	var i GetApplicationCountsByJobRow
@@ -445,7 +404,8 @@ SELECT
     j.location as job_location,
     j.job_type,
     u.github_username as user_github_username,
-    u.avatar_url as user_avatar_url
+    u.avatar_url as user_avatar_url,
+    u.acceptance_job_id as acceptance_job_id
 FROM job_applications a
 JOIN jobs j ON a.job_id = j.id
 JOIN users u ON a.user_id = u.id
@@ -487,6 +447,7 @@ type GetApplicationWithDetailsRow struct {
 	JobType                JobType
 	UserGithubUsername     string
 	UserAvatarUrl          pgtype.Text
+	AcceptanceJobID        uuid.UUID
 }
 
 func (q *Queries) GetApplicationWithDetails(ctx context.Context, id pgtype.UUID) (GetApplicationWithDetailsRow, error) {
@@ -527,6 +488,7 @@ func (q *Queries) GetApplicationWithDetails(ctx context.Context, id pgtype.UUID)
 		&i.JobType,
 		&i.UserGithubUsername,
 		&i.UserAvatarUrl,
+		&i.AcceptanceJobID,
 	)
 	return i, err
 }
@@ -658,13 +620,77 @@ func (q *Queries) HasUserApplied(ctx context.Context, arg HasUserAppliedParams) 
 	return has_applied, err
 }
 
+const listApplicationCountsByJob = `-- name: ListApplicationCountsByJob :many
+SELECT
+    ja.job_id,
+    COUNT(*)::bigint AS total_applications,
+    COUNT(CASE WHEN ja.status = 'submitted' THEN 1 END)::bigint AS submitted,
+    COUNT(CASE WHEN ja.status = 'quiz_completed' THEN 1 END)::bigint AS quiz_completed,
+    COUNT(CASE WHEN ja.status = 'under_review' THEN 1 END)::bigint AS under_review,
+    COUNT(CASE WHEN ja.status = 'shortlisted' THEN 1 END)::bigint AS shortlisted,
+    COUNT(CASE WHEN u.acceptance_job_id = ja.job_id THEN 1 END)::bigint AS accepted,
+    COUNT(CASE WHEN ja.status = 'rejected' THEN 1 END)::bigint AS rejected
+FROM job_applications ja
+JOIN jobs j ON j.id = ja.job_id AND j.status = 'published'
+JOIN users u ON u.id = ja.user_id
+GROUP BY ja.job_id
+ORDER BY total_applications DESC, ja.job_id
+`
+
+type ListApplicationCountsByJobRow struct {
+	JobID             pgtype.UUID
+	TotalApplications int64
+	Submitted         int64
+	QuizCompleted     int64
+	UnderReview       int64
+	Shortlisted       int64
+	Accepted          int64
+	Rejected          int64
+}
+
+// Per-job applicant counters for the admin applications overview. Computes
+// every count the admin page needs for all published jobs in a single pass:
+// the "accepted" counter is the number of applicants whose canonical
+// acceptance (users.acceptance_job_id) points at that job, not an
+// application status. Draft rows are included in total_applications so the
+// number matches what the admin can open per job.
+func (q *Queries) ListApplicationCountsByJob(ctx context.Context) ([]ListApplicationCountsByJobRow, error) {
+	rows, err := q.db.Query(ctx, listApplicationCountsByJob)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListApplicationCountsByJobRow
+	for rows.Next() {
+		var i ListApplicationCountsByJobRow
+		if err := rows.Scan(
+			&i.JobID,
+			&i.TotalApplications,
+			&i.Submitted,
+			&i.QuizCompleted,
+			&i.UnderReview,
+			&i.Shortlisted,
+			&i.Accepted,
+			&i.Rejected,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listApplicationsByJob = `-- name: ListApplicationsByJob :many
 SELECT 
     a.id, a.job_id, a.user_id, a.github_username, a.github_id, a.applicant_email, a.applicant_name, a.applicant_avatar_url, a.cover_letter, a.proposed_salary, a.proposed_salary_currency, a.availability_date, a.portfolio_url, a.linkedin_url, a.notes, a.status, a.submitted_at, a.reviewed_at, a.reviewed_by, a.employer_feedback, a.rejection_reason, a.quiz_id, a.quiz_score, a.quiz_completed_at, a.quiz_passed, a.can_view_ai_summary, a.created_at, a.updated_at,
     u.github_username,
     u.avatar_url,
     u.email,
-    u.name
+    u.name,
+    u.acceptance_job_id as acceptance_job_id
 FROM job_applications a
 JOIN users u ON a.user_id = u.id
 WHERE a.job_id = $1
@@ -724,6 +750,7 @@ type ListApplicationsByJobRow struct {
 	AvatarUrl              pgtype.Text
 	Email                  pgtype.Text
 	Name                   pgtype.Text
+	AcceptanceJobID        uuid.UUID
 }
 
 func (q *Queries) ListApplicationsByJob(ctx context.Context, arg ListApplicationsByJobParams) ([]ListApplicationsByJobRow, error) {
@@ -768,6 +795,7 @@ func (q *Queries) ListApplicationsByJob(ctx context.Context, arg ListApplication
 			&i.AvatarUrl,
 			&i.Email,
 			&i.Name,
+			&i.AcceptanceJobID,
 		); err != nil {
 			return nil, err
 		}
@@ -842,25 +870,26 @@ func (q *Queries) ListApplicationsByStatus(ctx context.Context, arg ListApplicat
 }
 
 const listApplicationsByUser = `-- name: ListApplicationsByUser :many
-SELECT 
-    a.id, a.job_id, a.user_id, a.github_username, a.github_id, a.applicant_email, a.applicant_name, a.applicant_avatar_url, a.cover_letter, a.proposed_salary, a.proposed_salary_currency, a.availability_date, a.portfolio_url, a.linkedin_url, a.notes, a.status, a.submitted_at, a.reviewed_at, a.reviewed_by, a.employer_feedback, a.rejection_reason, a.quiz_id, a.quiz_score, a.quiz_completed_at, a.quiz_passed, a.can_view_ai_summary, a.created_at, a.updated_at,
-    j.title as job_title,
-    j.company as job_company,
-    j.status as job_status,
-    COALESCE(
-        (SELECT json_agg(json_build_object(
-            'id', c.id,
-            'file_name', c.file_name,
-            'version', c.version,
-            'uploaded_at', c.uploaded_at
-        ))
-        FROM cv_application_usage cu
-        JOIN cv_versions c ON cu.cv_id = c.id
-        WHERE cu.application_id = a.id),
-        '[]'::json
-    ) as cvs
+SELECT
+    a.id,
+    a.job_id,
+    a.status,
+    a.submitted_at,
+    a.updated_at,
+    a.quiz_id,
+    a.quiz_score,
+    a.quiz_passed,
+    a.employer_feedback,
+    a.applicant_email,
+    j.title AS job_title,
+    j.company AS job_company,
+    j.location AS job_location,
+    j.job_type,
+    j.status AS job_status,
+    (u.acceptance_job_id IS NOT NULL AND a.job_id = u.acceptance_job_id) AS is_accepted_job
 FROM job_applications a
-JOIN jobs j ON a.job_id = j.id
+JOIN jobs j ON j.id = a.job_id
+JOIN users u ON u.id = a.user_id
 WHERE a.user_id = $1
 ORDER BY a.created_at DESC
 LIMIT $2 OFFSET $3
@@ -873,40 +902,27 @@ type ListApplicationsByUserParams struct {
 }
 
 type ListApplicationsByUserRow struct {
-	ID                     pgtype.UUID
-	JobID                  pgtype.UUID
-	UserID                 pgtype.UUID
-	GithubUsername         string
-	GithubID               int64
-	ApplicantEmail         pgtype.Text
-	ApplicantName          pgtype.Text
-	ApplicantAvatarUrl     pgtype.Text
-	CoverLetter            pgtype.Text
-	ProposedSalary         pgtype.Int4
-	ProposedSalaryCurrency pgtype.Text
-	AvailabilityDate       pgtype.Timestamp
-	PortfolioUrl           pgtype.Text
-	LinkedinUrl            pgtype.Text
-	Notes                  pgtype.Text
-	Status                 ApplicationStatus
-	SubmittedAt            pgtype.Timestamp
-	ReviewedAt             pgtype.Timestamp
-	ReviewedBy             uuid.UUID
-	EmployerFeedback       pgtype.Text
-	RejectionReason        pgtype.Text
-	QuizID                 uuid.UUID
-	QuizScore              pgtype.Int4
-	QuizCompletedAt        pgtype.Timestamp
-	QuizPassed             pgtype.Bool
-	CanViewAiSummary       pgtype.Bool
-	CreatedAt              pgtype.Timestamp
-	UpdatedAt              pgtype.Timestamp
-	JobTitle               string
-	JobCompany             string
-	JobStatus              JobStatus
-	Cvs                    interface{}
+	ID               pgtype.UUID
+	JobID            pgtype.UUID
+	Status           ApplicationStatus
+	SubmittedAt      pgtype.Timestamp
+	UpdatedAt        pgtype.Timestamp
+	QuizID           uuid.UUID
+	QuizScore        pgtype.Int4
+	QuizPassed       pgtype.Bool
+	EmployerFeedback pgtype.Text
+	ApplicantEmail   pgtype.Text
+	JobTitle         string
+	JobCompany       string
+	JobLocation      pgtype.Text
+	JobType          JobType
+	JobStatus        JobStatus
+	IsAcceptedJob    pgtype.Bool
 }
 
+// All applications for a given user (admin view), newest first, with the job
+// snapshot fields the admin user detail page renders. Unlike the user's own
+// dashboard query this has no acceptance filter: admins see the full history.
 func (q *Queries) ListApplicationsByUser(ctx context.Context, arg ListApplicationsByUserParams) ([]ListApplicationsByUserRow, error) {
 	rows, err := q.db.Query(ctx, listApplicationsByUser, arg.UserID, arg.Limit, arg.Offset)
 	if err != nil {
@@ -919,36 +935,307 @@ func (q *Queries) ListApplicationsByUser(ctx context.Context, arg ListApplicatio
 		if err := rows.Scan(
 			&i.ID,
 			&i.JobID,
-			&i.UserID,
-			&i.GithubUsername,
-			&i.GithubID,
-			&i.ApplicantEmail,
-			&i.ApplicantName,
-			&i.ApplicantAvatarUrl,
-			&i.CoverLetter,
-			&i.ProposedSalary,
-			&i.ProposedSalaryCurrency,
-			&i.AvailabilityDate,
-			&i.PortfolioUrl,
-			&i.LinkedinUrl,
-			&i.Notes,
 			&i.Status,
 			&i.SubmittedAt,
-			&i.ReviewedAt,
-			&i.ReviewedBy,
-			&i.EmployerFeedback,
-			&i.RejectionReason,
+			&i.UpdatedAt,
 			&i.QuizID,
 			&i.QuizScore,
-			&i.QuizCompletedAt,
 			&i.QuizPassed,
-			&i.CanViewAiSummary,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.EmployerFeedback,
+			&i.ApplicantEmail,
 			&i.JobTitle,
 			&i.JobCompany,
+			&i.JobLocation,
+			&i.JobType,
 			&i.JobStatus,
-			&i.Cvs,
+			&i.IsAcceptedJob,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMyApplicationsDashboard = `-- name: ListMyApplicationsDashboard :many
+SELECT
+    page.id,
+    page.job_id,
+    page.status,
+    page.submitted_at,
+    page.updated_at,
+    page.quiz_id,
+    page.quiz_score,
+    page.quiz_passed,
+    page.employer_feedback,
+    page.applicant_email,
+    page.job_title,
+    page.job_company,
+    page.job_location,
+    page.job_type,
+    page.job_status,
+    COUNT(*) OVER () AS total,
+    COUNT(*) FILTER (WHERE page.status IN ('submitted', 'quiz_started', 'quiz_completed', 'under_review', 'shortlisted', 'interviewed') AND NOT page.is_accepted_job) OVER () AS active,
+    COUNT(*) FILTER (WHERE page.is_accepted_job) OVER () AS accepted,
+    COUNT(*) FILTER (WHERE page.status = 'rejected') OVER () AS rejected,
+    page.is_accepted_job
+FROM (
+    SELECT
+        a.id,
+        a.job_id,
+        a.status,
+        a.submitted_at,
+        a.updated_at,
+        a.quiz_id,
+        a.quiz_score,
+        a.quiz_passed,
+        a.employer_feedback,
+        a.applicant_email,
+        a.created_at,
+        j.title AS job_title,
+        j.company AS job_company,
+        j.location AS job_location,
+        j.job_type,
+        j.status AS job_status,
+        (u.acceptance_job_id IS NOT NULL AND a.job_id = u.acceptance_job_id) AS is_accepted_job
+    FROM job_applications a
+    JOIN jobs j ON j.id = a.job_id
+    JOIN users u ON u.id = a.user_id
+    WHERE a.user_id = $1
+      AND (u.acceptance_job_id IS NULL OR a.job_id = u.acceptance_job_id)
+    ORDER BY a.created_at DESC
+    LIMIT $2 OFFSET $3
+) page
+ORDER BY page.created_at DESC
+`
+
+type ListMyApplicationsDashboardParams struct {
+	UserID pgtype.UUID
+	Limit  int32
+	Offset int32
+}
+
+type ListMyApplicationsDashboardRow struct {
+	ID               pgtype.UUID
+	JobID            pgtype.UUID
+	Status           ApplicationStatus
+	SubmittedAt      pgtype.Timestamp
+	UpdatedAt        pgtype.Timestamp
+	QuizID           uuid.UUID
+	QuizScore        pgtype.Int4
+	QuizPassed       pgtype.Bool
+	EmployerFeedback pgtype.Text
+	ApplicantEmail   pgtype.Text
+	JobTitle         string
+	JobCompany       string
+	JobLocation      pgtype.Text
+	JobType          JobType
+	JobStatus        JobStatus
+	Total            int64
+	Active           int64
+	Accepted         int64
+	Rejected         int64
+	IsAcceptedJob    pgtype.Bool
+}
+
+// Returns the rows shown on the user's "My Applications" page, pre-joined with
+// the job fields the UI renders, limited to the visible page, and carrying
+// window-function stats (total / active / accepted / rejected) computed over
+// exactly the returned rows so the client performs no aggregation.
+//
+// The accepted-job filter reads the canonical users.acceptance_job_id column:
+// when it is non-NULL only the application for that exact job is returned;
+// when it is NULL every application is returned. The "accepted" stat is the
+// count of rows whose job is the user's canonical accepted job; application
+// status stays purely process history and never records acceptance.
+func (q *Queries) ListMyApplicationsDashboard(ctx context.Context, arg ListMyApplicationsDashboardParams) ([]ListMyApplicationsDashboardRow, error) {
+	rows, err := q.db.Query(ctx, listMyApplicationsDashboard, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMyApplicationsDashboardRow
+	for rows.Next() {
+		var i ListMyApplicationsDashboardRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.JobID,
+			&i.Status,
+			&i.SubmittedAt,
+			&i.UpdatedAt,
+			&i.QuizID,
+			&i.QuizScore,
+			&i.QuizPassed,
+			&i.EmployerFeedback,
+			&i.ApplicantEmail,
+			&i.JobTitle,
+			&i.JobCompany,
+			&i.JobLocation,
+			&i.JobType,
+			&i.JobStatus,
+			&i.Total,
+			&i.Active,
+			&i.Accepted,
+			&i.Rejected,
+			&i.IsAcceptedJob,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublishedJobApplicationStats = `-- name: ListPublishedJobApplicationStats :many
+SELECT
+    j.id AS job_id,
+    j.title,
+    j.company,
+    j.category,
+    j.location,
+    j.job_type,
+    j.remote_possible,
+    COUNT(ja.id)::bigint AS total_applications,
+    COUNT(CASE WHEN ja.status = 'submitted' THEN 1 END)::bigint AS submitted,
+    COUNT(CASE WHEN ja.status = 'quiz_started' THEN 1 END)::bigint AS quiz_started,
+    COUNT(CASE WHEN ja.status = 'quiz_completed' THEN 1 END)::bigint AS quiz_completed,
+    COUNT(CASE WHEN ja.status = 'under_review' THEN 1 END)::bigint AS under_review,
+    COUNT(CASE WHEN ja.status = 'shortlisted' THEN 1 END)::bigint AS shortlisted,
+    COUNT(CASE WHEN ja.status = 'interviewed' THEN 1 END)::bigint AS interviewed,
+    COUNT(CASE WHEN ja.status = 'rejected' THEN 1 END)::bigint AS rejected,
+    COUNT(CASE WHEN ja.status = 'withdrawn' THEN 1 END)::bigint AS withdrawn,
+    COUNT(CASE WHEN u.acceptance_job_id = ja.job_id THEN 1 END)::bigint AS accepted
+FROM jobs j
+LEFT JOIN job_applications ja ON ja.job_id = j.id
+LEFT JOIN users u ON u.id = ja.user_id
+WHERE j.status = 'published'
+GROUP BY j.id, j.title, j.company, j.category, j.location, j.job_type, j.remote_possible
+ORDER BY total_applications DESC, j.created_at DESC
+`
+
+type ListPublishedJobApplicationStatsRow struct {
+	JobID             pgtype.UUID
+	Title             string
+	Company           string
+	Category          JobCategory
+	Location          pgtype.Text
+	JobType           JobType
+	RemotePossible    pgtype.Bool
+	TotalApplications int64
+	Submitted         int64
+	QuizStarted       int64
+	QuizCompleted     int64
+	UnderReview       int64
+	Shortlisted       int64
+	Interviewed       int64
+	Rejected          int64
+	Withdrawn         int64
+	Accepted          int64
+}
+
+// Per-job applicant counters for the admin applications overview, computed
+// for ALL published jobs in a single pass (no per-job round trips). The
+// "accepted" counter is the number of applicants whose canonical acceptance
+// (users.acceptance_job_id) points at that job, not an application status.
+// total_applications matches the raw application rows an admin can open for a
+// job (all statuses, including drafts).
+func (q *Queries) ListPublishedJobApplicationStats(ctx context.Context) ([]ListPublishedJobApplicationStatsRow, error) {
+	rows, err := q.db.Query(ctx, listPublishedJobApplicationStats)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPublishedJobApplicationStatsRow
+	for rows.Next() {
+		var i ListPublishedJobApplicationStatsRow
+		if err := rows.Scan(
+			&i.JobID,
+			&i.Title,
+			&i.Company,
+			&i.Category,
+			&i.Location,
+			&i.JobType,
+			&i.RemotePossible,
+			&i.TotalApplications,
+			&i.Submitted,
+			&i.QuizStarted,
+			&i.QuizCompleted,
+			&i.UnderReview,
+			&i.Shortlisted,
+			&i.Interviewed,
+			&i.Rejected,
+			&i.Withdrawn,
+			&i.Accepted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQuizCompletedCandidates = `-- name: ListQuizCompletedCandidates :many
+SELECT
+    a.id AS application_id,
+    a.job_id,
+    a.quiz_score,
+    COALESCE(u.name, a.applicant_name)::text AS applicant_name,
+    COALESCE(u.email, a.applicant_email)::text AS applicant_email,
+    COALESCE(u.github_username, a.github_username) AS applicant_github_username,
+    COALESCE(u.avatar_url, a.applicant_avatar_url)::text AS applicant_avatar_url,
+    j.title AS job_title
+FROM job_applications a
+JOIN jobs j ON j.id = a.job_id
+LEFT JOIN users u ON u.id = a.user_id
+WHERE j.status = 'published'
+  AND a.quiz_id IS NOT NULL
+  AND a.quiz_completed_at IS NOT NULL
+  AND a.status NOT IN ('draft', 'quiz_started')
+ORDER BY a.quiz_score DESC NULLS LAST, a.quiz_completed_at DESC
+LIMIT $1
+`
+
+type ListQuizCompletedCandidatesRow struct {
+	ApplicationID           pgtype.UUID
+	JobID                   pgtype.UUID
+	QuizScore               pgtype.Int4
+	ApplicantName           string
+	ApplicantEmail          string
+	ApplicantGithubUsername string
+	ApplicantAvatarUrl      string
+	JobTitle                string
+}
+
+// Quiz-completed applicants across all published jobs, carrying only the
+// fields the admin "Quiz Completed Users" card renders, pre-sorted by score
+// so the client performs no aggregation.
+func (q *Queries) ListQuizCompletedCandidates(ctx context.Context, limit int32) ([]ListQuizCompletedCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listQuizCompletedCandidates, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuizCompletedCandidatesRow
+	for rows.Next() {
+		var i ListQuizCompletedCandidatesRow
+		if err := rows.Scan(
+			&i.ApplicationID,
+			&i.JobID,
+			&i.QuizScore,
+			&i.ApplicantName,
+			&i.ApplicantEmail,
+			&i.ApplicantGithubUsername,
+			&i.ApplicantAvatarUrl,
+			&i.JobTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -1006,13 +1293,14 @@ func (q *Queries) MarkInterviewed(ctx context.Context, id pgtype.UUID) (JobAppli
 }
 
 const rejectApplication = `-- name: RejectApplication :one
+
 UPDATE job_applications
 SET 
     status = 'rejected',
     rejection_reason = $2,
     employer_feedback = $3,
     updated_at = NOW()
-WHERE id = $1 AND status NOT IN ('accepted', 'withdrawn')
+WHERE id = $1 AND status <> 'withdrawn'
 RETURNING id, job_id, user_id, github_username, github_id, applicant_email, applicant_name, applicant_avatar_url, cover_letter, proposed_salary, proposed_salary_currency, availability_date, portfolio_url, linkedin_url, notes, status, submitted_at, reviewed_at, reviewed_by, employer_feedback, rejection_reason, quiz_id, quiz_score, quiz_completed_at, quiz_passed, can_view_ai_summary, created_at, updated_at
 `
 
@@ -1022,6 +1310,11 @@ type RejectApplicationParams struct {
 	EmployerFeedback pgtype.Text
 }
 
+// Note: accepting a job does NOT update job_applications.status. Acceptance is
+// a user-level relationship stored only in users.acceptance_job_id (handled in
+// service/application.go AcceptApplication, which sets users.acceptance_job_id
+// via SetUserAcceptanceJob); job_applications.status remains purely
+// application-process history.
 func (q *Queries) RejectApplication(ctx context.Context, arg RejectApplicationParams) (JobApplication, error) {
 	row := q.db.QueryRow(ctx, rejectApplication, arg.ID, arg.RejectionReason, arg.EmployerFeedback)
 	var i JobApplication
@@ -1265,7 +1558,7 @@ UPDATE job_applications
 SET 
     status = 'withdrawn',
     updated_at = NOW()
-WHERE id = $1 AND user_id = $2 AND status NOT IN ('accepted', 'rejected')
+WHERE id = $1 AND user_id = $2 AND status <> 'rejected'
 RETURNING id, job_id, user_id, github_username, github_id, applicant_email, applicant_name, applicant_avatar_url, cover_letter, proposed_salary, proposed_salary_currency, availability_date, portfolio_url, linkedin_url, notes, status, submitted_at, reviewed_at, reviewed_by, employer_feedback, rejection_reason, quiz_id, quiz_score, quiz_completed_at, quiz_passed, can_view_ai_summary, created_at, updated_at
 `
 
