@@ -114,7 +114,6 @@ func (s *ApplicationService) ApplyForJob(ctx context.Context, jobID uuid.UUID, c
 	return app, nil
 }
 
-
 func (s *ApplicationService) GetApplicationsForJob(ctx context.Context, jobID uuid.UUID, limit, offset int32) ([]database.ListApplicationsByJobRow, error) {
 	var pgJobID pgtype.UUID
 	copy(pgJobID.Bytes[:], jobID[:])
@@ -163,38 +162,47 @@ func (s *ApplicationService) MarkInterviewed(ctx context.Context, appID uuid.UUI
 }
 
 // AcceptApplication marks the applicant as accepted for the job referenced by
-// the application. Acceptance is a user-level relationship and is recorded in
-// exactly one place: users.acceptance_job_id. job_applications.status is NOT
-// touched here - it stays pure application-process history (the application
-// keeps its previous lifecycle status, e.g. quiz_completed or interviewed).
-func (s *ApplicationService) AcceptApplication(ctx context.Context, appID uuid.UUID) (database.GetApplicationWithDetailsRow, error) {
+// the application. The canonical user-level relationship is recorded in
+// users.acceptance_job_id; application status remains historical state.
+func (s *ApplicationService) AcceptApplication(ctx context.Context, appID uuid.UUID) (database.GetApplicationWithDetailsRow, bool, error) {
 	var pgAppID pgtype.UUID
 	copy(pgAppID.Bytes[:], appID[:])
 	pgAppID.Valid = true
 
 	app, err := s.queries.GetApplicationWithDetails(ctx, pgAppID)
 	if err != nil {
-		return database.GetApplicationWithDetailsRow{}, fmt.Errorf("application not found: %w", err)
+		return database.GetApplicationWithDetailsRow{}, false, fmt.Errorf("application not found: %w", err)
 	}
 
 	jobID := pgUUIDToUUID(app.JobID)
 	if jobID == uuid.Nil {
-		return database.GetApplicationWithDetailsRow{}, fmt.Errorf("application has no job reference")
+		return database.GetApplicationWithDetailsRow{}, false, fmt.Errorf("application has no job reference")
 	}
 
 	// A user may only hold a single accepted job: refuse to accept when the
 	// applicant has already accepted a *different* job. Accepting again for the
 	// same job is idempotent (re-setting the same acceptance_job_id).
 	if app.AcceptanceJobID != uuid.Nil && app.AcceptanceJobID != jobID {
-		return database.GetApplicationWithDetailsRow{}, fmt.Errorf("applicant has already been accepted for another job")
+		return database.GetApplicationWithDetailsRow{}, false, fmt.Errorf("applicant has already been accepted for another job")
+	}
+	if app.AcceptanceJobID == jobID {
+		if _, err := s.queries.AcceptApplication(ctx, pgAppID); err != nil {
+			return database.GetApplicationWithDetailsRow{}, false, fmt.Errorf("failed to update application status: %w", err)
+		}
+		app.Status = database.ApplicationStatusAccepted
+		return app, false, nil
 	}
 
 	if _, err := s.queries.SetUserAcceptanceJob(ctx, database.SetUserAcceptanceJobParams{
 		ID:              app.UserID,
 		AcceptanceJobID: jobID,
 	}); err != nil {
-		return database.GetApplicationWithDetailsRow{}, fmt.Errorf("failed to record accepted job for user: %w", err)
+		return database.GetApplicationWithDetailsRow{}, false, fmt.Errorf("failed to record accepted job for user: %w", err)
 	}
+	if _, err := s.queries.AcceptApplication(ctx, pgAppID); err != nil {
+		return database.GetApplicationWithDetailsRow{}, false, fmt.Errorf("failed to update application status: %w", err)
+	}
+	app.Status = database.ApplicationStatusAccepted
 
 	// Auto-derive the user's job categories from their GitHub top languages
 	// and store them. Best-effort: acceptance succeeds even if this fails.
@@ -202,7 +210,7 @@ func (s *ApplicationService) AcceptApplication(ctx context.Context, appID uuid.U
 		fmt.Printf("WARNING: failed to sync user categories: %v\n", err)
 	}
 
-	return app, nil
+	return app, true, nil
 }
 
 // syncUserCategories derives the user's job categories from their GitHub top

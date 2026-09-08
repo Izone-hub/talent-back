@@ -162,6 +162,7 @@ func V1Routes(
 	// -----------------------------------------------------------------------
 	// Intelligence routes
 	// -----------------------------------------------------------------------
+	mux.HandleFunc("POST /api/v1/contact", intelligenceController.Contact)
 	mux.HandleFunc("GET /api/v1/intelligence/{id}/summary", authMiddleware.Authenticate(intelligenceController.GetLatestUserSummary))
 	mux.HandleFunc("GET /api/v1/intelligence/user/{id}/summary", authMiddleware.Authenticate(intelligenceController.GetLatestUserSummary))
 	mux.HandleFunc("POST /api/v1/intelligence/github/{id}/fetch", authMiddleware.Authenticate(intelligenceController.FetchGitHubSnapshot))
