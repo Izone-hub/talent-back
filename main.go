@@ -130,7 +130,7 @@ func main() {
 	appService := service.NewApplicationService(db)
 
 	quizController := controller.NewQuizController(quizService)
-	appController := controller.NewApplicationController(appService, cvService)
+	appController := controller.NewApplicationController(appService, cvService, cfg.AnalyzerURL, cfg.InternalServiceToken)
 
 	savedJobController := controller.NewSavedJobController(db)
 	adminController := controller.NewAdminController(

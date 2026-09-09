@@ -27,6 +27,8 @@ SELECT
     j.job_type,
     u.github_username as user_github_username,
     u.avatar_url as user_avatar_url,
+    u.email as user_email,
+    u.name as user_name,
     u.acceptance_job_id as acceptance_job_id
 FROM job_applications a
 JOIN jobs j ON a.job_id = j.id
@@ -133,6 +135,7 @@ SELECT
 FROM job_applications a
 JOIN users u ON a.user_id = u.id
 WHERE a.job_id = $1
+    AND u.acceptance_job_id IS NULL
 ORDER BY 
     CASE a.status::text
         WHEN 'draft' THEN 1
@@ -212,11 +215,13 @@ SET
 WHERE id = $1 AND status = 'shortlisted'
 RETURNING *;
 
--- Note: accepting a job does NOT update job_applications.status. Acceptance is
--- a user-level relationship stored only in users.acceptance_job_id (handled in
--- service/application.go AcceptApplication, which sets users.acceptance_job_id
--- via SetUserAcceptanceJob); job_applications.status remains purely
--- application-process history.
+-- name: AcceptApplication :one
+UPDATE job_applications
+SET
+    status = 'accepted',
+    updated_at = NOW()
+WHERE id = $1 AND status <> 'withdrawn'
+RETURNING *;
 
 -- name: RejectApplication :one
 UPDATE job_applications
@@ -310,6 +315,7 @@ FROM job_applications a
 JOIN jobs j ON j.id = a.job_id
 LEFT JOIN users u ON u.id = a.user_id
 WHERE j.status = 'published'
+    AND u.acceptance_job_id IS NULL
   AND a.quiz_id IS NOT NULL
   AND a.quiz_completed_at IS NOT NULL
   AND a.status NOT IN ('draft', 'quiz_started')

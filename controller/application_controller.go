@@ -1,8 +1,12 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/Izone-hub/talent-backend/service"
@@ -10,14 +14,21 @@ import (
 )
 
 type ApplicationController struct {
-	appService *service.ApplicationService
-	cvService  *service.CvService
+	appService    *service.ApplicationService
+	cvService     *service.CvService
+	analyzerURL   string
+	internalToken string
 }
 
-func NewApplicationController(appService *service.ApplicationService, cvService *service.CvService) *ApplicationController {
+func NewApplicationController(appService *service.ApplicationService, cvService *service.CvService, analyzerURL, internalToken string) *ApplicationController {
+	if analyzerURL == "" {
+		analyzerURL = "http://localhost:8000"
+	}
 	return &ApplicationController{
-		appService: appService,
-		cvService:  cvService,
+		appService:    appService,
+		cvService:     cvService,
+		analyzerURL:   strings.TrimSuffix(analyzerURL, "/"),
+		internalToken: internalToken,
 	}
 }
 
@@ -204,13 +215,53 @@ func (c *ApplicationController) AcceptApplication(w http.ResponseWriter, r *http
 		return
 	}
 
-	app, err := c.appService.AcceptApplication(r.Context(), appID)
+	app, newlyAccepted, err := c.appService.AcceptApplication(r.Context(), appID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if newlyAccepted {
+		go c.sendAcceptanceEmail(app)
+	}
 
 	writeJSON(w, http.StatusOK, app)
+}
+
+func (c *ApplicationController) sendAcceptanceEmail(app database.GetApplicationWithDetailsRow) {
+	payload, err := json.Marshal(map[string]interface{}{
+		"type":            "job_accepted",
+		"recipient_email": app.UserEmail.String,
+		"candidate_name":  app.UserName.String,
+		"job_title":       app.JobTitle,
+		"company_name":    app.JobCompany,
+		"job_id":          uuid.UUID(app.JobID.Bytes).String(),
+		"accepted_at":     time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		log.Printf("ERROR: failed to encode job acceptance email notification: %v", err)
+		return
+	}
+
+	req, err := http.NewRequest(http.MethodPost, c.analyzerURL+"/api/v1/notifications/job-accepted", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("ERROR: failed to create job acceptance email notification: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.internalToken != "" {
+		req.Header.Set("X-Internal-Service-Token", c.internalToken)
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("ERROR: failed to send job acceptance email notification: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		log.Printf("ERROR: analyzer rejected job acceptance email notification with status %d", resp.StatusCode)
+	}
 }
 
 func (c *ApplicationController) RejectApplication(w http.ResponseWriter, r *http.Request) {

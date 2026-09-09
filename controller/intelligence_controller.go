@@ -418,6 +418,65 @@ func (c *IntelligenceController) GenerateJobDescription(w http.ResponseWriter, r
 	w.Write(body)
 }
 
+type ContactRequest struct {
+	FirstName      string `json:"first_name"`
+	LastName       string `json:"last_name"`
+	Email          string `json:"email"`
+	Company        string `json:"company"`
+	BudgetRange    string `json:"budget_range"`
+	ProjectDetails string `json:"project_details"`
+}
+
+func (c *IntelligenceController) Contact(w http.ResponseWriter, r *http.Request) {
+	var req ContactRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if strings.TrimSpace(req.FirstName) == "" ||
+		strings.TrimSpace(req.LastName) == "" ||
+		strings.TrimSpace(req.Email) == "" ||
+		strings.TrimSpace(req.ProjectDetails) == "" {
+		writeError(w, http.StatusBadRequest, "Required contact fields are missing")
+		return
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Unable to process contact request")
+		return
+	}
+
+	analyzerRequest, err := c.newAnalyzerRequest(
+		http.MethodPost,
+		c.getAnalyzerURL()+"/api/v1/contact",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Unable to process contact request")
+		return
+	}
+	analyzerRequest.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(analyzerRequest)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Contact service is temporarily unavailable")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		writeError(w, http.StatusBadGateway, "Unable to send contact inquiry")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message":"Contact inquiry sent successfully"}`))
+}
+
 func (c *IntelligenceController) GenerateJobDescriptionPublic(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Prompt      string `json:"prompt"`
