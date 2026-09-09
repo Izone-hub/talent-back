@@ -13,7 +13,10 @@ func V1Routes(
 	cvController *controller.CvController,
 	tagController *controller.TagController,
 	questionController *controller.QuestionController,
+	questionFeedbackController *controller.QuestionFeedbackController,
 	quizController *controller.QuizController,
+	quizResultFeedbackController *controller.QuizResultFeedbackController,
+	quizAnswerFeedbackController *controller.QuizAnswerFeedbackController,
 	appController *controller.ApplicationController,
 	sandboxController *controller.SandboxController,
 	intelligenceController *controller.IntelligenceController,
@@ -111,6 +114,8 @@ func V1Routes(
 	mux.HandleFunc("GET /api/v1/questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.ListQuestions)))
 
 	mux.HandleFunc("GET /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.GetQuestion)))
+	mux.HandleFunc("GET /api/v1/questions/{id}/feedback", authMiddleware.Authenticate(questionFeedbackController.Get))
+	mux.HandleFunc("POST /api/v1/questions/{id}/feedback", authMiddleware.Authenticate(questionFeedbackController.Upsert))
 
 	mux.HandleFunc("POST /api/v1/questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.CreateQuestion)))
 
@@ -151,6 +156,17 @@ func V1Routes(
 
 	// Example registration in main.go
 	mux.HandleFunc("GET /api/v1/quizzes/{id}/next", authMiddleware.Authenticate(quizController.GetNextQuestion))
+
+	// Quiz result feedback routes (overall quiz experience)
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/feedback", authMiddleware.Authenticate(quizResultFeedbackController.Get))
+	mux.HandleFunc("POST /api/v1/quizzes/{id}/feedback", authMiddleware.Authenticate(quizResultFeedbackController.Upsert))
+	mux.HandleFunc("POST /api/v1/quizzes/{id}/feedback/validate", authMiddleware.Authenticate(quizResultFeedbackController.Validate))
+	mux.HandleFunc("DELETE /api/v1/quizzes/{id}/feedback", authMiddleware.Authenticate(quizResultFeedbackController.Delete))
+
+	// Quiz answer feedback routes (per-question feedback with application context)
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/answer-feedback", authMiddleware.Authenticate(quizAnswerFeedbackController.GetByAttempt))
+	mux.HandleFunc("POST /api/v1/quizzes/{id}/answer-feedback", authMiddleware.Authenticate(quizAnswerFeedbackController.Upsert))
+	mux.HandleFunc("DELETE /api/v1/quizzes/{id}/answer-feedback/{questionId}", authMiddleware.Authenticate(quizAnswerFeedbackController.Delete))
 
 	// -----------------------------------------------------------------------
 	// Sandbox / Judge routes
@@ -247,6 +263,45 @@ func V1Routes(
 	mux.HandleFunc("GET /api/v1/admin/applications/overview",
 		authMiddleware.Authenticate(
 			authMiddleware.RequireAdmin(adminController.GetApplicationsOverview),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/applications/{id}/feedback",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(quizResultFeedbackController.GetByApplication),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/contact-requests",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.ListContactRequests),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/contact-requests/{id}",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.GetContactRequest),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/contact-requests/{id}/messages",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.ListContactRequestMessages),
+		),
+	)
+	mux.HandleFunc("GET /api/v1/admin/contact-requests/by-email",
+		authMiddleware.Authenticate(authMiddleware.RequireAdmin(adminController.ListContactRequestsByEmail)),
+	)
+	mux.HandleFunc("PATCH /api/v1/admin/contact-requests/{id}/status",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.UpdateContactRequestStatus),
+		),
+	)
+	mux.HandleFunc("DELETE /api/v1/admin/contact-requests/{id}",
+		authMiddleware.Authenticate(authMiddleware.RequireAdmin(adminController.DeleteContactRequest)),
+	)
+	mux.HandleFunc("DELETE /api/v1/admin/contact-requests/{id}/messages/{messageId}",
+		authMiddleware.Authenticate(authMiddleware.RequireAdmin(adminController.DeleteContactRequestMessage)),
+	)
+	mux.HandleFunc("POST /api/v1/admin/contact-requests/{id}/reply",
+		authMiddleware.Authenticate(
+			authMiddleware.RequireAdmin(adminController.ReplyToContactRequest),
 		),
 	)
 

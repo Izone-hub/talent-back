@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
+	"net/mail"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -434,46 +436,39 @@ func (c *IntelligenceController) Contact(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if strings.TrimSpace(req.FirstName) == "" ||
-		strings.TrimSpace(req.LastName) == "" ||
-		strings.TrimSpace(req.Email) == "" ||
-		strings.TrimSpace(req.ProjectDetails) == "" {
+	req.FirstName = strings.TrimSpace(req.FirstName)
+	req.LastName = strings.TrimSpace(req.LastName)
+	req.Email = strings.TrimSpace(req.Email)
+	req.Company = strings.TrimSpace(req.Company)
+	req.BudgetRange = strings.TrimSpace(req.BudgetRange)
+	req.ProjectDetails = strings.TrimSpace(req.ProjectDetails)
+	if req.FirstName == "" || req.LastName == "" || req.Email == "" || req.ProjectDetails == "" {
 		writeError(w, http.StatusBadRequest, "Required contact fields are missing")
 		return
 	}
+	if len(req.FirstName) > 100 || len(req.LastName) > 100 || len(req.Email) > 255 || len(req.Company) > 255 || len(req.BudgetRange) > 100 || len(req.ProjectDetails) > 10000 {
+		writeError(w, http.StatusBadRequest, "Contact request fields are too long")
+		return
+	}
+	parsedEmail, err := mail.ParseAddress(req.Email)
+	if err != nil || parsedEmail.Address != req.Email {
+		writeError(w, http.StatusBadRequest, "Invalid email address")
+		return
+	}
 
-	payload, err := json.Marshal(req)
-	if err != nil {
+	company := pgtype.Text{String: req.Company, Valid: req.Company != ""}
+	budgetRange := pgtype.Text{String: req.BudgetRange, Valid: req.BudgetRange != ""}
+	if _, err := c.queries.CreateContactRequest(r.Context(), database.CreateContactRequestParams{
+		FirstName: req.FirstName, LastName: req.LastName, Email: req.Email,
+		Company: company, BudgetRange: budgetRange, ProjectDetails: req.ProjectDetails,
+	}); err != nil {
+		log.Printf("ERROR: failed to store contact request: %v", err)
 		writeError(w, http.StatusInternalServerError, "Unable to process contact request")
-		return
-	}
-
-	analyzerRequest, err := c.newAnalyzerRequest(
-		http.MethodPost,
-		c.getAnalyzerURL()+"/api/v1/contact",
-		bytes.NewReader(payload),
-	)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Unable to process contact request")
-		return
-	}
-	analyzerRequest.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(analyzerRequest)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "Contact service is temporarily unavailable")
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		writeError(w, http.StatusBadGateway, "Unable to send contact inquiry")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"message":"Contact inquiry sent successfully"}`))
 }
 

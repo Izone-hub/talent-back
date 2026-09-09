@@ -582,6 +582,18 @@ type CompanySetting struct {
 	UpdatedAt       pgtype.Timestamp
 }
 
+type ContactRequest struct {
+	ID             pgtype.UUID
+	FirstName      string
+	LastName       string
+	Email          string
+	Company        pgtype.Text
+	BudgetRange    pgtype.Text
+	ProjectDetails string
+	Status         string
+	CreatedAt      pgtype.Timestamp
+}
+
 type CvApplicationUsage struct {
 	CvID          pgtype.UUID
 	ApplicationID pgtype.UUID
@@ -723,6 +735,15 @@ type Question struct {
 	UpdatedAt        pgtype.Timestamp
 }
 
+type QuestionFeedback struct {
+	ID         pgtype.UUID
+	UserID     pgtype.UUID
+	QuestionID pgtype.UUID
+	Feedback   string
+	CreatedAt  pgtype.Timestamp
+	UpdatedAt  pgtype.Timestamp
+}
+
 type QuestionTag struct {
 	QuestionID pgtype.UUID
 	TagID      pgtype.UUID
@@ -745,6 +766,17 @@ type QuizAnswer struct {
 	IsReviewed       pgtype.Bool
 	CreatedAt        pgtype.Timestamp
 	UpdatedAt        pgtype.Timestamp
+}
+
+type QuizAnswerFeedback struct {
+	ID            pgtype.UUID
+	UserID        pgtype.UUID
+	QuizAttemptID pgtype.UUID
+	QuestionID    pgtype.UUID
+	ApplicationID pgtype.UUID
+	Feedback      string
+	CreatedAt     pgtype.Timestamp
+	UpdatedAt     pgtype.Timestamp
 }
 
 type QuizAnswerHistory struct {
@@ -782,6 +814,14 @@ type QuizAttempt struct {
 	UpdatedAt               pgtype.Timestamp
 }
 
+type QuizAttemptQuestion struct {
+	ID            pgtype.UUID
+	QuizAttemptID pgtype.UUID
+	QuestionID    pgtype.UUID
+	QuestionOrder int32
+	CreatedAt     pgtype.Timestamp
+}
+
 type QuizResult struct {
 	ID                         pgtype.UUID
 	QuizAttemptID              pgtype.UUID
@@ -804,6 +844,16 @@ type QuizResult struct {
 	Strengths                  []string
 	Weaknesses                 []string
 	CreatedAt                  pgtype.Timestamp
+}
+
+type QuizResultFeedback struct {
+	ID            pgtype.UUID
+	UserID        pgtype.UUID
+	QuizAttemptID pgtype.UUID
+	Rating        string
+	Comment       pgtype.Text
+	CreatedAt     pgtype.Timestamp
+	UpdatedAt     pgtype.Timestamp
 }
 
 type RepositoryAnalysis struct {

@@ -14,21 +14,23 @@ import (
 )
 
 type ApplicationController struct {
-	appService    *service.ApplicationService
-	cvService     *service.CvService
-	analyzerURL   string
-	internalToken string
+	appService      *service.ApplicationService
+	cvService       *service.CvService
+	feedbackService *service.QuizResultFeedbackService
+	analyzerURL     string
+	internalToken   string
 }
 
-func NewApplicationController(appService *service.ApplicationService, cvService *service.CvService, analyzerURL, internalToken string) *ApplicationController {
+func NewApplicationController(appService *service.ApplicationService, cvService *service.CvService, feedbackService *service.QuizResultFeedbackService, analyzerURL, internalToken string) *ApplicationController {
 	if analyzerURL == "" {
 		analyzerURL = "http://localhost:8000"
 	}
 	return &ApplicationController{
-		appService:    appService,
-		cvService:     cvService,
-		analyzerURL:   strings.TrimSuffix(analyzerURL, "/"),
-		internalToken: internalToken,
+		appService:      appService,
+		cvService:       cvService,
+		feedbackService: feedbackService,
+		analyzerURL:     strings.TrimSuffix(analyzerURL, "/"),
+		internalToken:   internalToken,
 	}
 }
 
@@ -130,7 +132,34 @@ func (c *ApplicationController) GetApplicationDetail(w http.ResponseWriter, r *h
 		return
 	}
 
-	writeJSON(w, http.StatusOK, app)
+	appBytes, err := json.Marshal(app)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(appBytes, &resp); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Read candidate feedback directly from public.quiz_result_feedback table
+	if c.feedbackService != nil {
+		if fb, fbErr := c.feedbackService.GetByApplication(r.Context(), appID); fbErr == nil && fb != nil {
+			resp["candidate_feedback"] = fb
+			resp["CandidateFeedback"] = fb
+			resp["candidate_feedback_rating"] = fb.Rating
+			resp["CandidateFeedbackRating"] = fb.Rating
+			resp["candidate_feedback_comment"] = fb.Comment
+			resp["CandidateFeedbackComment"] = fb.Comment
+			resp["rating"] = fb.Rating
+			resp["Rating"] = fb.Rating
+			resp["comment"] = fb.Comment
+			resp["Comment"] = fb.Comment
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (c *ApplicationController) GetApplicationInformation(w http.ResponseWriter, r *http.Request) {

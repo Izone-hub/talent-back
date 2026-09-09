@@ -102,6 +102,59 @@ func main() {
 		log.Println("company_settings default row ensured")
 	}
 
+	// Ensure quiz_attempt_questions table exists
+	_, err = db.Exec(context.Background(), `
+		CREATE TABLE IF NOT EXISTS quiz_attempt_questions (
+			id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			quiz_attempt_id UUID NOT NULL REFERENCES quiz_attempts(id) ON DELETE CASCADE,
+			question_id     UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+			question_order  INTEGER NOT NULL,
+			created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+			UNIQUE (quiz_attempt_id, question_order),
+			UNIQUE (quiz_attempt_id, question_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_quiz_attempt_questions_question_id ON quiz_attempt_questions(question_id);
+	`)
+	if err != nil {
+		log.Printf("Failed to ensure quiz_attempt_questions table: %v", err)
+	} else {
+		log.Println("quiz_attempt_questions table ensured")
+	}
+
+	// Ensure quiz_result_feedback and quiz_answer_feedback tables exist
+	_, err = db.Exec(context.Background(), `
+		CREATE TABLE IF NOT EXISTS quiz_result_feedback (
+			id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			quiz_attempt_id UUID NOT NULL REFERENCES quiz_attempts(id) ON DELETE CASCADE,
+			rating          VARCHAR(10) NOT NULL CHECK (rating IN ('positive', 'negative')),
+			comment         TEXT,
+			created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+			updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+			UNIQUE (user_id, quiz_attempt_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_quiz_result_feedback_attempt_id ON quiz_result_feedback(quiz_attempt_id);
+
+		CREATE TABLE IF NOT EXISTS quiz_answer_feedback (
+			id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			quiz_attempt_id UUID NOT NULL REFERENCES quiz_attempts(id) ON DELETE CASCADE,
+			question_id     UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+			application_id  UUID NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+			feedback        VARCHAR(30) NOT NULL CHECK (feedback IN ('not_related', 'not_enough_time', 'too_difficult', 'unclear_question')),
+			created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+			updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+			UNIQUE (user_id, quiz_attempt_id, question_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_quiz_answer_feedback_attempt_id ON quiz_answer_feedback(quiz_attempt_id);
+		CREATE INDEX IF NOT EXISTS idx_quiz_answer_feedback_application_id ON quiz_answer_feedback(application_id);
+	`)
+	if err != nil {
+		log.Printf("Failed to ensure quiz feedback tables: %v", err)
+	} else {
+		log.Println("quiz feedback tables ensured")
+	}
+
 	// Initialize services
 	githubService := service.NewGithubService(&cfg)
 	authService := service.NewAuthService(&cfg, githubService, db)
@@ -119,6 +172,7 @@ func main() {
 	cvController := controller.NewCvController(cvService)
 	tagController := controller.NewTagController(tagService)
 	questionController := controller.NewQuestionController(questionService)
+	questionFeedbackController := controller.NewQuestionFeedbackController(service.NewQuestionFeedbackService(db))
 	sandboxController := controller.NewSandboxController(sandboxService)
 	intelligenceController := controller.NewIntelligenceController(githubService, db, cfg.AnalyzerURL, cfg.InternalServiceToken)
 
@@ -128,16 +182,23 @@ func main() {
 	// Initialize quiz and application services
 	quizService := service.NewQuizService(db)
 	appService := service.NewApplicationService(db)
+	quizResultFeedbackService := service.NewQuizResultFeedbackService(db)
+	quizResultFeedbackController := controller.NewQuizResultFeedbackController(quizResultFeedbackService)
 
 	quizController := controller.NewQuizController(quizService)
-	appController := controller.NewApplicationController(appService, cvService, cfg.AnalyzerURL, cfg.InternalServiceToken)
+	appController := controller.NewApplicationController(appService, cvService, quizResultFeedbackService, cfg.AnalyzerURL, cfg.InternalServiceToken)
 
 	savedJobController := controller.NewSavedJobController(db)
 	adminController := controller.NewAdminController(
 		service.NewAdminService(db),
+		cfg.AnalyzerURL,
+		cfg.InternalServiceToken,
 	)
 	surveyQuestionService := service.NewSurveyQuestionService(db)
 	surveyQuestionController := controller.NewSurveyQuestionController(surveyQuestionService, jobService)
+
+	quizAnswerFeedbackService := service.NewQuizAnswerFeedbackService(db)
+	quizAnswerFeedbackController := controller.NewQuizAnswerFeedbackController(quizAnswerFeedbackService)
 
 	// Create router
 	handler := router.NewRouter(
@@ -146,7 +207,10 @@ func main() {
 		cvController,
 		tagController,
 		questionController,
+		questionFeedbackController,
 		quizController,
+		quizResultFeedbackController,
+		quizAnswerFeedbackController,
 		appController,
 		sandboxController,
 		intelligenceController,

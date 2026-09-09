@@ -12,6 +12,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptApplication = `-- name: AcceptApplication :one
+UPDATE job_applications
+SET
+    status = 'accepted',
+    updated_at = NOW()
+WHERE id = $1 AND status <> 'withdrawn'
+RETURNING id, job_id, user_id, github_username, github_id, applicant_email, applicant_name, applicant_avatar_url, cover_letter, proposed_salary, proposed_salary_currency, availability_date, portfolio_url, linkedin_url, notes, status, submitted_at, reviewed_at, reviewed_by, employer_feedback, rejection_reason, quiz_id, quiz_score, quiz_completed_at, quiz_passed, can_view_ai_summary, created_at, updated_at
+`
+
+func (q *Queries) AcceptApplication(ctx context.Context, id pgtype.UUID) (JobApplication, error) {
+	row := q.db.QueryRow(ctx, acceptApplication, id)
+	var i JobApplication
+	err := row.Scan(
+		&i.ID,
+		&i.JobID,
+		&i.UserID,
+		&i.GithubUsername,
+		&i.GithubID,
+		&i.ApplicantEmail,
+		&i.ApplicantName,
+		&i.ApplicantAvatarUrl,
+		&i.CoverLetter,
+		&i.ProposedSalary,
+		&i.ProposedSalaryCurrency,
+		&i.AvailabilityDate,
+		&i.PortfolioUrl,
+		&i.LinkedinUrl,
+		&i.Notes,
+		&i.Status,
+		&i.SubmittedAt,
+		&i.ReviewedAt,
+		&i.ReviewedBy,
+		&i.EmployerFeedback,
+		&i.RejectionReason,
+		&i.QuizID,
+		&i.QuizScore,
+		&i.QuizCompletedAt,
+		&i.QuizPassed,
+		&i.CanViewAiSummary,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const addEmployerFeedback = `-- name: AddEmployerFeedback :one
 UPDATE job_applications
 SET 
@@ -405,8 +450,8 @@ SELECT
     j.job_type,
     u.github_username as user_github_username,
     u.avatar_url as user_avatar_url,
-	u.email as user_email,
-	u.name as user_name,
+    u.email as user_email,
+    u.name as user_name,
     u.acceptance_job_id as acceptance_job_id
 FROM job_applications a
 JOIN jobs j ON a.job_id = j.id
@@ -495,51 +540,6 @@ func (q *Queries) GetApplicationWithDetails(ctx context.Context, id pgtype.UUID)
 		&i.UserEmail,
 		&i.UserName,
 		&i.AcceptanceJobID,
-	)
-	return i, err
-}
-
-const acceptApplication = `-- name: AcceptApplication :one
-UPDATE job_applications
-SET
-    status = 'accepted',
-    updated_at = NOW()
-WHERE id = $1 AND status <> 'withdrawn'
-RETURNING id, job_id, user_id, github_username, github_id, applicant_email, applicant_name, applicant_avatar_url, cover_letter, proposed_salary, proposed_salary_currency, availability_date, portfolio_url, linkedin_url, notes, status, submitted_at, reviewed_at, reviewed_by, employer_feedback, rejection_reason, quiz_id, quiz_score, quiz_completed_at, quiz_passed, can_view_ai_summary, created_at, updated_at
-`
-
-func (q *Queries) AcceptApplication(ctx context.Context, id pgtype.UUID) (JobApplication, error) {
-	row := q.db.QueryRow(ctx, acceptApplication, id)
-	var i JobApplication
-	err := row.Scan(
-		&i.ID,
-		&i.JobID,
-		&i.UserID,
-		&i.GithubUsername,
-		&i.GithubID,
-		&i.ApplicantEmail,
-		&i.ApplicantName,
-		&i.ApplicantAvatarUrl,
-		&i.CoverLetter,
-		&i.ProposedSalary,
-		&i.ProposedSalaryCurrency,
-		&i.AvailabilityDate,
-		&i.PortfolioUrl,
-		&i.LinkedinUrl,
-		&i.Notes,
-		&i.Status,
-		&i.SubmittedAt,
-		&i.ReviewedAt,
-		&i.ReviewedBy,
-		&i.EmployerFeedback,
-		&i.RejectionReason,
-		&i.QuizID,
-		&i.QuizScore,
-		&i.QuizCompletedAt,
-		&i.QuizPassed,
-		&i.CanViewAiSummary,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -745,7 +745,7 @@ SELECT
 FROM job_applications a
 JOIN users u ON a.user_id = u.id
 WHERE a.job_id = $1
-	AND u.acceptance_job_id IS NULL
+    AND u.acceptance_job_id IS NULL
 ORDER BY 
     CASE a.status::text
         WHEN 'draft' THEN 1
@@ -1249,7 +1249,7 @@ FROM job_applications a
 JOIN jobs j ON j.id = a.job_id
 LEFT JOIN users u ON u.id = a.user_id
 WHERE j.status = 'published'
-	AND u.acceptance_job_id IS NULL
+    AND u.acceptance_job_id IS NULL
   AND a.quiz_id IS NOT NULL
   AND a.quiz_completed_at IS NOT NULL
   AND a.status NOT IN ('draft', 'quiz_started')
@@ -1346,7 +1346,6 @@ func (q *Queries) MarkInterviewed(ctx context.Context, id pgtype.UUID) (JobAppli
 }
 
 const rejectApplication = `-- name: RejectApplication :one
-
 UPDATE job_applications
 SET 
     status = 'rejected',
@@ -1363,11 +1362,6 @@ type RejectApplicationParams struct {
 	EmployerFeedback pgtype.Text
 }
 
-// Note: accepting a job does NOT update job_applications.status. Acceptance is
-// a user-level relationship stored only in users.acceptance_job_id (handled in
-// service/application.go AcceptApplication, which sets users.acceptance_job_id
-// via SetUserAcceptanceJob); job_applications.status remains purely
-// application-process history.
 func (q *Queries) RejectApplication(ctx context.Context, arg RejectApplicationParams) (JobApplication, error) {
 	row := q.db.QueryRow(ctx, rejectApplication, arg.ID, arg.RejectionReason, arg.EmployerFeedback)
 	var i JobApplication

@@ -6,6 +6,7 @@ import (
 
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AdminService struct {
@@ -49,6 +50,107 @@ type RecentActivityItem struct {
 	Status         string  `json:"status"`
 	SubmittedAt    *string `json:"submitted_at"`
 	JobTitle       string  `json:"job_title"`
+}
+
+type ContactRequestResponse struct {
+	ID             uuid.UUID `json:"id"`
+	FirstName      string    `json:"first_name"`
+	LastName       string    `json:"last_name"`
+	Email          string    `json:"email"`
+	Company        string    `json:"company"`
+	BudgetRange    string    `json:"budget_range"`
+	ProjectDetails string    `json:"project_details"`
+	Status         string    `json:"status"`
+	CreatedAt      string    `json:"created_at"`
+}
+
+type ContactRequestsPage struct {
+	Items      []ContactRequestResponse `json:"items"`
+	Pagination struct {
+		Limit   int32 `json:"limit"`
+		Offset  int32 `json:"offset"`
+		Total   int64 `json:"total"`
+		HasMore bool  `json:"has_more"`
+	} `json:"pagination"`
+}
+
+func contactRequestResponse(row database.ContactRequest) ContactRequestResponse {
+	return ContactRequestResponse{
+		ID:             uuid.UUID(row.ID.Bytes),
+		FirstName:      row.FirstName,
+		LastName:       row.LastName,
+		Email:          row.Email,
+		Company:        row.Company.String,
+		BudgetRange:    row.BudgetRange.String,
+		ProjectDetails: row.ProjectDetails,
+		Status:         row.Status,
+		CreatedAt:      row.CreatedAt.Time.Format(time.RFC3339),
+	}
+}
+
+func (s *AdminService) ListContactRequests(ctx context.Context, limit, offset int32) (*ContactRequestsPage, error) {
+	rows, err := s.queries.ListContactRequests(ctx, database.ListContactRequestsParams{Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, err
+	}
+	total, err := s.queries.CountContactRequests(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ContactRequestResponse, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, contactRequestResponse(row))
+	}
+	return &ContactRequestsPage{
+		Items: items,
+		Pagination: struct {
+			Limit   int32 `json:"limit"`
+			Offset  int32 `json:"offset"`
+			Total   int64 `json:"total"`
+			HasMore bool  `json:"has_more"`
+		}{Limit: limit, Offset: offset, Total: total, HasMore: int64(offset+limit) < total},
+	}, nil
+}
+
+func (s *AdminService) GetContactRequest(ctx context.Context, id uuid.UUID) (*ContactRequestResponse, error) {
+	row, err := s.queries.GetContactRequest(ctx, pgUUID(id))
+	if err != nil {
+		return nil, err
+	}
+	response := contactRequestResponse(row)
+	return &response, nil
+}
+
+func (s *AdminService) ListContactRequestsByEmail(ctx context.Context, email string) ([]ContactRequestResponse, error) {
+	rows, err := s.queries.ListContactRequestsByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ContactRequestResponse, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, contactRequestResponse(row))
+	}
+	return items, nil
+}
+
+func (s *AdminService) UpdateContactRequestStatus(ctx context.Context, id uuid.UUID, status string) (*ContactRequestResponse, error) {
+	row, err := s.queries.UpdateContactRequestStatus(ctx, database.UpdateContactRequestStatusParams{ID: pgUUID(id), Status: status})
+	if err != nil {
+		return nil, err
+	}
+	response := contactRequestResponse(row)
+	return &response, nil
+}
+
+func (s *AdminService) DeleteContactRequest(ctx context.Context, id uuid.UUID) error {
+	return s.queries.DeleteContactRequest(ctx, pgUUID(id))
+}
+
+func pgUUID(id uuid.UUID) pgtype.UUID {
+	var value pgtype.UUID
+	copy(value.Bytes[:], id[:])
+	value.Valid = true
+	return value
 }
 
 func (s *AdminService) GetDashboard(ctx context.Context) (*DashboardResponse, error) {
@@ -135,30 +237,30 @@ func (s *AdminService) UpdateCompanySettings(ctx context.Context, settings Compa
 // It carries the same fields as models.User but omits sensitive data
 // (GitHub access token / token expiry) from the JSON response.
 type AdminUser struct {
-	ID                   uuid.UUID  `json:"id"`
-	GithubID             int64      `json:"github_id"`
-	GithubUsername       string     `json:"github_username"`
-	Email                *string    `json:"email,omitempty"`
-	AvatarURL            *string    `json:"avatar_url,omitempty"`
-	Name                 *string    `json:"name,omitempty"`
-	Role                 string     `json:"role"`
-	LastLoginAt          *string    `json:"last_login_at,omitempty"`
-	CreatedAt            *string    `json:"created_at,omitempty"`
-	UpdatedAt            *string    `json:"updated_at,omitempty"`
-	PublicRepos          int        `json:"public_repos"`
-	PublicGists          int        `json:"public_gists"`
-	Followers            int        `json:"followers"`
-	Following            int        `json:"following"`
-	Hireable             bool       `json:"hireable"`
-	Blog                 *string    `json:"blog,omitempty"`
-	Company              *string    `json:"company,omitempty"`
-	Location             *string    `json:"location,omitempty"`
-	Bio                  *string    `json:"bio,omitempty"`
-	TwitterUsername      *string    `json:"twitter_username,omitempty"`
-	TopLanguages         []string   `json:"top_languages"`
-	ContributionCount    int        `json:"contribution_count"`
-	AcceptanceJobID      *uuid.UUID `json:"acceptance_job_id,omitempty"`
-	Categories           []string   `json:"categories"`
+	ID                uuid.UUID  `json:"id"`
+	GithubID          int64      `json:"github_id"`
+	GithubUsername    string     `json:"github_username"`
+	Email             *string    `json:"email,omitempty"`
+	AvatarURL         *string    `json:"avatar_url,omitempty"`
+	Name              *string    `json:"name,omitempty"`
+	Role              string     `json:"role"`
+	LastLoginAt       *string    `json:"last_login_at,omitempty"`
+	CreatedAt         *string    `json:"created_at,omitempty"`
+	UpdatedAt         *string    `json:"updated_at,omitempty"`
+	PublicRepos       int        `json:"public_repos"`
+	PublicGists       int        `json:"public_gists"`
+	Followers         int        `json:"followers"`
+	Following         int        `json:"following"`
+	Hireable          bool       `json:"hireable"`
+	Blog              *string    `json:"blog,omitempty"`
+	Company           *string    `json:"company,omitempty"`
+	Location          *string    `json:"location,omitempty"`
+	Bio               *string    `json:"bio,omitempty"`
+	TwitterUsername   *string    `json:"twitter_username,omitempty"`
+	TopLanguages      []string   `json:"top_languages"`
+	ContributionCount int        `json:"contribution_count"`
+	AcceptanceJobID   *uuid.UUID `json:"acceptance_job_id,omitempty"`
+	Categories        []string   `json:"categories"`
 }
 
 // ListAllUsers returns a paginated list of registered users, newest first,
