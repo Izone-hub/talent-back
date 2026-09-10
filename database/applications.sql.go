@@ -741,11 +741,20 @@ SELECT
     u.avatar_url,
     u.email,
     u.name,
-    u.acceptance_job_id as acceptance_job_id
+    u.acceptance_job_id as acceptance_job_id,
+    COALESCE(fb.rating, '')::text as candidate_feedback_rating,
+    COALESCE(fb.comment, '')::text as candidate_feedback_comment
 FROM job_applications a
-JOIN users u ON a.user_id = u.id
+LEFT JOIN users u ON a.user_id = u.id
+LEFT JOIN LATERAL (
+    SELECT qrf.rating, qrf.comment
+    FROM quiz_result_feedback qrf
+    LEFT JOIN quiz_attempts qa ON qa.id = qrf.quiz_attempt_id
+    WHERE (qa.application_id = a.id) OR (a.quiz_id IS NOT NULL AND qrf.quiz_attempt_id = a.quiz_id)
+    ORDER BY qrf.created_at DESC
+    LIMIT 1
+) fb ON true
 WHERE a.job_id = $1
-    AND u.acceptance_job_id IS NULL
 ORDER BY 
     CASE a.status::text
         WHEN 'draft' THEN 1
@@ -770,39 +779,41 @@ type ListApplicationsByJobParams struct {
 }
 
 type ListApplicationsByJobRow struct {
-	ID                     pgtype.UUID
-	JobID                  pgtype.UUID
-	UserID                 pgtype.UUID
-	GithubUsername         string
-	GithubID               int64
-	ApplicantEmail         pgtype.Text
-	ApplicantName          pgtype.Text
-	ApplicantAvatarUrl     pgtype.Text
-	CoverLetter            pgtype.Text
-	ProposedSalary         pgtype.Int4
-	ProposedSalaryCurrency pgtype.Text
-	AvailabilityDate       pgtype.Timestamp
-	PortfolioUrl           pgtype.Text
-	LinkedinUrl            pgtype.Text
-	Notes                  pgtype.Text
-	Status                 ApplicationStatus
-	SubmittedAt            pgtype.Timestamp
-	ReviewedAt             pgtype.Timestamp
-	ReviewedBy             uuid.UUID
-	EmployerFeedback       pgtype.Text
-	RejectionReason        pgtype.Text
-	QuizID                 uuid.UUID
-	QuizScore              pgtype.Int4
-	QuizCompletedAt        pgtype.Timestamp
-	QuizPassed             pgtype.Bool
-	CanViewAiSummary       pgtype.Bool
-	CreatedAt              pgtype.Timestamp
-	UpdatedAt              pgtype.Timestamp
-	GithubUsername_2       string
-	AvatarUrl              pgtype.Text
-	Email                  pgtype.Text
-	Name                   pgtype.Text
-	AcceptanceJobID        uuid.UUID
+	ID                       pgtype.UUID
+	JobID                    pgtype.UUID
+	UserID                   pgtype.UUID
+	GithubUsername           string
+	GithubID                 int64
+	ApplicantEmail           pgtype.Text
+	ApplicantName            pgtype.Text
+	ApplicantAvatarUrl       pgtype.Text
+	CoverLetter              pgtype.Text
+	ProposedSalary           pgtype.Int4
+	ProposedSalaryCurrency   pgtype.Text
+	AvailabilityDate         pgtype.Timestamp
+	PortfolioUrl             pgtype.Text
+	LinkedinUrl              pgtype.Text
+	Notes                    pgtype.Text
+	Status                   ApplicationStatus
+	SubmittedAt              pgtype.Timestamp
+	ReviewedAt               pgtype.Timestamp
+	ReviewedBy               uuid.UUID
+	EmployerFeedback         pgtype.Text
+	RejectionReason          pgtype.Text
+	QuizID                   uuid.UUID
+	QuizScore                pgtype.Int4
+	QuizCompletedAt          pgtype.Timestamp
+	QuizPassed               pgtype.Bool
+	CanViewAiSummary         pgtype.Bool
+	CreatedAt                pgtype.Timestamp
+	UpdatedAt                pgtype.Timestamp
+	GithubUsername_2         pgtype.Text
+	AvatarUrl                pgtype.Text
+	Email                    pgtype.Text
+	Name                     pgtype.Text
+	AcceptanceJobID          uuid.UUID
+	CandidateFeedbackRating  string
+	CandidateFeedbackComment string
 }
 
 func (q *Queries) ListApplicationsByJob(ctx context.Context, arg ListApplicationsByJobParams) ([]ListApplicationsByJobRow, error) {
@@ -848,6 +859,8 @@ func (q *Queries) ListApplicationsByJob(ctx context.Context, arg ListApplication
 			&i.Email,
 			&i.Name,
 			&i.AcceptanceJobID,
+			&i.CandidateFeedbackRating,
+			&i.CandidateFeedbackComment,
 		); err != nil {
 			return nil, err
 		}
@@ -1244,12 +1257,21 @@ SELECT
     COALESCE(u.email, a.applicant_email)::text AS applicant_email,
     COALESCE(u.github_username, a.github_username) AS applicant_github_username,
     COALESCE(u.avatar_url, a.applicant_avatar_url)::text AS applicant_avatar_url,
-    j.title AS job_title
+    j.title AS job_title,
+    COALESCE(fb.rating, '')::text as candidate_feedback_rating,
+    COALESCE(fb.comment, '')::text as candidate_feedback_comment
 FROM job_applications a
 JOIN jobs j ON j.id = a.job_id
 LEFT JOIN users u ON u.id = a.user_id
+LEFT JOIN LATERAL (
+    SELECT qrf.rating, qrf.comment
+    FROM quiz_result_feedback qrf
+    LEFT JOIN quiz_attempts qa ON qa.id = qrf.quiz_attempt_id
+    WHERE (qa.application_id = a.id) OR (a.quiz_id IS NOT NULL AND qrf.quiz_attempt_id = a.quiz_id)
+    ORDER BY qrf.created_at DESC
+    LIMIT 1
+) fb ON true
 WHERE j.status = 'published'
-    AND u.acceptance_job_id IS NULL
   AND a.quiz_id IS NOT NULL
   AND a.quiz_completed_at IS NOT NULL
   AND a.status NOT IN ('draft', 'quiz_started')
@@ -1258,14 +1280,16 @@ LIMIT $1
 `
 
 type ListQuizCompletedCandidatesRow struct {
-	ApplicationID           pgtype.UUID
-	JobID                   pgtype.UUID
-	QuizScore               pgtype.Int4
-	ApplicantName           string
-	ApplicantEmail          string
-	ApplicantGithubUsername string
-	ApplicantAvatarUrl      string
-	JobTitle                string
+	ApplicationID            pgtype.UUID
+	JobID                    pgtype.UUID
+	QuizScore                pgtype.Int4
+	ApplicantName            string
+	ApplicantEmail           string
+	ApplicantGithubUsername  string
+	ApplicantAvatarUrl       string
+	JobTitle                 string
+	CandidateFeedbackRating  string
+	CandidateFeedbackComment string
 }
 
 // Quiz-completed applicants across all published jobs, carrying only the
@@ -1289,6 +1313,8 @@ func (q *Queries) ListQuizCompletedCandidates(ctx context.Context, limit int32) 
 			&i.ApplicantGithubUsername,
 			&i.ApplicantAvatarUrl,
 			&i.JobTitle,
+			&i.CandidateFeedbackRating,
+			&i.CandidateFeedbackComment,
 		); err != nil {
 			return nil, err
 		}

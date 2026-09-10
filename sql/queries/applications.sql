@@ -131,11 +131,20 @@ SELECT
     u.avatar_url,
     u.email,
     u.name,
-    u.acceptance_job_id as acceptance_job_id
+    u.acceptance_job_id as acceptance_job_id,
+    COALESCE(fb.rating, '')::text as candidate_feedback_rating,
+    COALESCE(fb.comment, '')::text as candidate_feedback_comment
 FROM job_applications a
-JOIN users u ON a.user_id = u.id
+LEFT JOIN users u ON a.user_id = u.id
+LEFT JOIN LATERAL (
+    SELECT qrf.rating, qrf.comment
+    FROM quiz_result_feedback qrf
+    LEFT JOIN quiz_attempts qa ON qa.id = qrf.quiz_attempt_id
+    WHERE (qa.application_id = a.id) OR (a.quiz_id IS NOT NULL AND qrf.quiz_attempt_id = a.quiz_id)
+    ORDER BY qrf.created_at DESC
+    LIMIT 1
+) fb ON true
 WHERE a.job_id = $1
-    AND u.acceptance_job_id IS NULL
 ORDER BY 
     CASE a.status::text
         WHEN 'draft' THEN 1
@@ -310,12 +319,21 @@ SELECT
     COALESCE(u.email, a.applicant_email)::text AS applicant_email,
     COALESCE(u.github_username, a.github_username) AS applicant_github_username,
     COALESCE(u.avatar_url, a.applicant_avatar_url)::text AS applicant_avatar_url,
-    j.title AS job_title
+    j.title AS job_title,
+    COALESCE(fb.rating, '')::text as candidate_feedback_rating,
+    COALESCE(fb.comment, '')::text as candidate_feedback_comment
 FROM job_applications a
 JOIN jobs j ON j.id = a.job_id
 LEFT JOIN users u ON u.id = a.user_id
+LEFT JOIN LATERAL (
+    SELECT qrf.rating, qrf.comment
+    FROM quiz_result_feedback qrf
+    LEFT JOIN quiz_attempts qa ON qa.id = qrf.quiz_attempt_id
+    WHERE (qa.application_id = a.id) OR (a.quiz_id IS NOT NULL AND qrf.quiz_attempt_id = a.quiz_id)
+    ORDER BY qrf.created_at DESC
+    LIMIT 1
+) fb ON true
 WHERE j.status = 'published'
-    AND u.acceptance_job_id IS NULL
   AND a.quiz_id IS NOT NULL
   AND a.quiz_completed_at IS NOT NULL
   AND a.status NOT IN ('draft', 'quiz_started')

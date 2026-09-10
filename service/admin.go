@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
@@ -11,11 +13,13 @@ import (
 
 type AdminService struct {
 	queries *database.Queries
+	db      database.DBTX
 }
 
 func NewAdminService(db database.DBTX) *AdminService {
 	return &AdminService{
 		queries: database.New(db),
+		db:      db,
 	}
 }
 
@@ -28,6 +32,21 @@ type DashboardStats struct {
 	NewApplicationsToday int32 `json:"new_applications_today"`
 }
 
+type TrendPoint struct {
+	Date  string `json:"date"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+	Total int    `json:"total"`
+}
+
+type StatusDistributionItem struct {
+	Status     string  `json:"status"`
+	Label      string  `json:"label"`
+	Count      int     `json:"count"`
+	Percentage float64 `json:"percentage"`
+	Color      string  `json:"color"`
+}
+
 // RecentActivityPagination contains pagination info for recent activity.
 type RecentActivityPagination struct {
 	Limit   int32 `json:"limit"`
@@ -37,9 +56,12 @@ type RecentActivityPagination struct {
 }
 
 // DashboardResponse is the combined response for the admin dashboard endpoint.
-// It contains both statistics and recent activity in a single response.
+// It contains both statistics, analytics charts, and recent activity.
 type DashboardResponse struct {
 	Stats                    DashboardStats            `json:"stats"`
+	ApplicationsTrend        []TrendPoint              `json:"applications_trend"`
+	UsersTrend               []TrendPoint              `json:"users_trend"`
+	StatusDistribution       []StatusDistributionItem  `json:"status_distribution"`
 	RecentActivity           []RecentActivityItem      `json:"recent_activity"`
 	RecentActivityPagination *RecentActivityPagination `json:"recent_activity_pagination,omitempty"`
 }
@@ -159,6 +181,115 @@ func (s *AdminService) GetDashboard(ctx context.Context) (*DashboardResponse, er
 		return nil, err
 	}
 
+	// 1. Applications Trend (Daily for last 30 days)
+	appTrend := make([]TrendPoint, 0, 30)
+	if s.db != nil {
+		if appRows, err := s.db.Query(ctx, `
+			SELECT 
+				TO_CHAR(d::date, 'YYYY-MM-DD') AS date,
+				TO_CHAR(d::date, 'Mon DD') AS label,
+				COUNT(ja.id)::int AS count
+			FROM generate_series(
+				CURRENT_DATE - INTERVAL '29 days',
+				CURRENT_DATE,
+				INTERVAL '1 day'
+			) d
+			LEFT JOIN job_applications ja ON ja.submitted_at::date = d::date AND ja.status != 'draft'
+			GROUP BY d::date
+			ORDER BY d::date ASC;
+		`); err == nil {
+			runningAppTotal := 0
+			for appRows.Next() {
+				var p TrendPoint
+				if scanErr := appRows.Scan(&p.Date, &p.Label, &p.Count); scanErr == nil {
+					runningAppTotal += p.Count
+					p.Total = runningAppTotal
+					appTrend = append(appTrend, p)
+				}
+			}
+			appRows.Close()
+		}
+	}
+
+	// 2. Users Trend (Monthly for last 8 months with cumulative growth)
+	userTrend := make([]TrendPoint, 0, 8)
+	if s.db != nil {
+		if userRows, err := s.db.Query(ctx, `
+			SELECT 
+				TO_CHAR(d::date, 'YYYY-MM') AS date,
+				TO_CHAR(d::date, 'Mon YYYY') AS label,
+				COUNT(u.id)::int AS count
+			FROM generate_series(
+				DATE_TRUNC('month', CURRENT_DATE - INTERVAL '7 months'),
+				DATE_TRUNC('month', CURRENT_DATE),
+				INTERVAL '1 month'
+			) d
+			LEFT JOIN users u ON DATE_TRUNC('month', u.created_at) = d::date
+			GROUP BY d::date
+			ORDER BY d::date ASC;
+		`); err == nil {
+			runningUserTotal := 0
+			for userRows.Next() {
+				var p TrendPoint
+				if scanErr := userRows.Scan(&p.Date, &p.Label, &p.Count); scanErr == nil {
+					runningUserTotal += p.Count
+					p.Total = runningUserTotal
+					userTrend = append(userTrend, p)
+				}
+			}
+			userRows.Close()
+		}
+	}
+
+	// 3. Application Status Distribution
+	statusColors := map[string]struct{ label, color string }{
+		"submitted":      {"Submitted", "#3b82f6"},
+		"quiz_started":   {"Quiz Started", "#6366f1"},
+		"quiz_completed": {"Quiz Completed", "#8b5cf6"},
+		"under_review":   {"Under Review", "#f59e0b"},
+		"shortlisted":    {"Shortlisted", "#06b6d4"},
+		"interviewed":    {"Interviewed", "#14b8a6"},
+		"accepted":       {"Accepted", "#10b981"},
+		"rejected":       {"Rejected", "#ef4444"},
+		"withdrawn":      {"Withdrawn", "#64748b"},
+	}
+
+	distItems := make([]StatusDistributionItem, 0)
+	totalApps := 0
+	if s.db != nil {
+		if distRows, err := s.db.Query(ctx, `
+			SELECT status, COUNT(*)::int AS count
+			FROM job_applications
+			WHERE status != 'draft'
+			GROUP BY status
+			ORDER BY count DESC;
+		`); err == nil {
+			for distRows.Next() {
+				var status string
+				var count int
+				if scanErr := distRows.Scan(&status, &count); scanErr == nil {
+					totalApps += count
+					meta, ok := statusColors[status]
+					if !ok {
+						meta = struct{ label, color string }{strings.ReplaceAll(status, "_", " "), "#94a3b8"}
+					}
+					distItems = append(distItems, StatusDistributionItem{
+						Status: status,
+						Label:  meta.label,
+						Count:  count,
+						Color:  meta.color,
+					})
+				}
+			}
+			distRows.Close()
+		}
+	}
+	for i := range distItems {
+		if totalApps > 0 {
+			distItems[i].Percentage = math.Round((float64(distItems[i].Count)/float64(totalApps))*1000) / 10
+		}
+	}
+
 	// Fetch first page of recent activity (10 items)
 	const defaultLimit = int32(10)
 	activity, err := s.GetRecentActivity(ctx, defaultLimit)
@@ -183,7 +314,10 @@ func (s *AdminService) GetDashboard(ctx context.Context) (*DashboardResponse, er
 			NewUsersToday:        stats.NewUsersToday,
 			NewApplicationsToday: stats.NewApplicationsToday,
 		},
-		RecentActivity: activity,
+		ApplicationsTrend:        appTrend,
+		UsersTrend:               userTrend,
+		StatusDistribution:       distItems,
+		RecentActivity:           activity,
 		RecentActivityPagination: &RecentActivityPagination{
 			Limit:   defaultLimit,
 			Offset:  0,
@@ -497,14 +631,16 @@ type OverviewJob struct {
 }
 
 type QuizCompletedCandidate struct {
-	ApplicationID  uuid.UUID `json:"application_id"`
-	JobID          uuid.UUID `json:"job_id"`
-	QuizScore      *int      `json:"quiz_score"`
-	ApplicantName  string    `json:"applicant_name"`
-	ApplicantEmail string    `json:"applicant_email"`
-	GithubUsername string    `json:"applicant_github_username"`
-	AvatarURL      *string   `json:"applicant_avatar_url"`
-	JobTitle       string    `json:"job_title"`
+	ApplicationID            uuid.UUID `json:"application_id"`
+	JobID                    uuid.UUID `json:"job_id"`
+	QuizScore                *int      `json:"quiz_score"`
+	ApplicantName            string    `json:"applicant_name"`
+	ApplicantEmail           string    `json:"applicant_email"`
+	GithubUsername           string    `json:"applicant_github_username"`
+	AvatarURL                *string   `json:"applicant_avatar_url"`
+	JobTitle                 string    `json:"job_title"`
+	CandidateFeedbackRating  string    `json:"candidate_feedback_rating,omitempty"`
+	CandidateFeedbackComment string    `json:"candidate_feedback_comment,omitempty"`
 }
 
 type AdminApplicationsOverview struct {
@@ -577,14 +713,16 @@ func (s *AdminService) GetApplicationsOverview(ctx context.Context, quizCandidat
 			score = &s
 		}
 		candidateModels = append(candidateModels, QuizCompletedCandidate{
-			ApplicationID:  pgUUIDToUUID(c.ApplicationID),
-			JobID:          pgUUIDToUUID(c.JobID),
-			QuizScore:      score,
-			ApplicantName:  c.ApplicantName,
-			ApplicantEmail: c.ApplicantEmail,
-			GithubUsername: c.ApplicantGithubUsername,
-			AvatarURL:      emptyStrToNil(c.ApplicantAvatarUrl),
-			JobTitle:       c.JobTitle,
+			ApplicationID:            pgUUIDToUUID(c.ApplicationID),
+			JobID:                    pgUUIDToUUID(c.JobID),
+			QuizScore:                score,
+			ApplicantName:            c.ApplicantName,
+			ApplicantEmail:           c.ApplicantEmail,
+			GithubUsername:           c.ApplicantGithubUsername,
+			AvatarURL:                emptyStrToNil(c.ApplicantAvatarUrl),
+			JobTitle:                 c.JobTitle,
+			CandidateFeedbackRating:  c.CandidateFeedbackRating,
+			CandidateFeedbackComment: c.CandidateFeedbackComment,
 		})
 	}
 

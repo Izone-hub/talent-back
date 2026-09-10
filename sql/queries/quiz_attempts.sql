@@ -256,7 +256,7 @@ SELECT
     qa.*
 FROM quiz_answers qa
 JOIN quiz_attempts qat ON qa.quiz_attempt_id = qat.id
-WHERE qat.user_id = $1
+WHERE qat.user_id = $1 AND qat.status = 'completed'
 ORDER BY qa.created_at DESC;
 
 -- Attempt question management

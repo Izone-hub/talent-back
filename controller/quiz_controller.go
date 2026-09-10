@@ -205,7 +205,7 @@ func (c *QuizController) RunCode(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("RunCode: attemptID=%s, userID=%s, questionID=%s, lang=%s", id, claims.UserID.String(), req.QuestionID, req.Language)
 
-	result, err := c.quizService.RunQuizCode(r.Context(), id, claims.UserID.String(), req.QuestionID, req.Language, req.Code)
+	_, err := c.quizService.RunQuizCode(r.Context(), id, claims.UserID.String(), req.QuestionID, req.Language, req.Code)
 	if err != nil {
 		switch {
 		case strings.Contains(err.Error(), "does not belong"):
@@ -220,7 +220,10 @@ func (c *QuizController) RunCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "executed",
+		"message": "Code executed successfully",
+	})
 }
 
 // 7. SubmitQuiz handler
@@ -275,8 +278,39 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Quiz submitted successfully"})
 }
 
-// GetQuizReview handler returns the full question-by-question review of a
-// quiz attempt. Available to the attempt owner or any admin.
+// GetQuizResult handler returns the lightweight initial summary of a completed quiz attempt.
+func (c *QuizController) GetQuizResult(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	id := r.PathValue("id")
+	isAdmin := claims.Role == "admin"
+
+	summary, err := c.quizService.GetQuizResultSummary(r.Context(), id, claims.UserID.String(), isAdmin)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "invalid attempt ID"),
+			err.Error() == "no rows in result set":
+			writeError(w, http.StatusNotFound, "Quiz attempt not found: "+err.Error())
+		case strings.Contains(err.Error(), "does not belong"),
+			strings.Contains(err.Error(), "only available after quiz completion"):
+			writeError(w, http.StatusForbidden, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "Failed to get quiz result: "+err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, summary)
+}
+
+// GetQuizReview handler returns the lightweight initial summary of a completed quiz attempt,
+// or question review items if requested via view=questions or questions=true.
 func (c *QuizController) GetQuizReview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -289,21 +323,105 @@ func (c *QuizController) GetQuizReview(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	isAdmin := claims.Role == "admin"
 
-	review, err := c.quizService.GetQuizReview(r.Context(), id, claims.UserID.String(), isAdmin)
+	if r.URL.Query().Get("view") == "questions" || r.URL.Query().Get("questions") == "true" {
+		questions, err := c.quizService.GetQuizReviewQuestions(r.Context(), id, claims.UserID.String(), isAdmin)
+		if err != nil {
+			switch {
+			case strings.Contains(err.Error(), "invalid attempt ID"),
+				err.Error() == "no rows in result set":
+				writeError(w, http.StatusNotFound, "Quiz attempt not found: "+err.Error())
+			case strings.Contains(err.Error(), "does not belong"),
+				strings.Contains(err.Error(), "only available after quiz completion"):
+				writeError(w, http.StatusForbidden, err.Error())
+			default:
+				writeError(w, http.StatusInternalServerError, "Failed to get quiz review questions: "+err.Error())
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, questions)
+		return
+	}
+
+	summary, err := c.quizService.GetQuizResultSummary(r.Context(), id, claims.UserID.String(), isAdmin)
 	if err != nil {
 		switch {
 		case strings.Contains(err.Error(), "invalid attempt ID"),
 			err.Error() == "no rows in result set":
 			writeError(w, http.StatusNotFound, "Quiz attempt not found: "+err.Error())
-		case strings.Contains(err.Error(), "does not belong"):
-			writeError(w, http.StatusForbidden, "You cannot view this quiz attempt")
+		case strings.Contains(err.Error(), "does not belong"),
+			strings.Contains(err.Error(), "only available after quiz completion"):
+			writeError(w, http.StatusForbidden, err.Error())
 		default:
 			writeError(w, http.StatusInternalServerError, "Failed to get quiz review: "+err.Error())
 		}
 		return
 	}
 
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, summary)
+}
+
+// GetQuizReviewQuestions handler returns the lightweight question review list.
+func (c *QuizController) GetQuizReviewQuestions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	id := r.PathValue("id")
+	isAdmin := claims.Role == "admin"
+
+	questions, err := c.quizService.GetQuizReviewQuestions(r.Context(), id, claims.UserID.String(), isAdmin)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "invalid attempt ID"),
+			err.Error() == "no rows in result set":
+			writeError(w, http.StatusNotFound, "Quiz attempt not found: "+err.Error())
+		case strings.Contains(err.Error(), "does not belong"),
+			strings.Contains(err.Error(), "only available after quiz completion"):
+			writeError(w, http.StatusForbidden, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "Failed to get quiz review questions: "+err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, questions)
+}
+
+// GetQuizQuestionDetail handler returns details (options, correct answer, explanation, code output) for a single question.
+func (c *QuizController) GetQuizQuestionDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	id := r.PathValue("id")
+	questionID := r.PathValue("questionId")
+	isAdmin := claims.Role == "admin"
+
+	detail, err := c.quizService.GetQuizQuestionDetail(r.Context(), id, questionID, claims.UserID.String(), isAdmin)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "invalid attempt ID"),
+			strings.Contains(err.Error(), "invalid question ID"),
+			err.Error() == "no rows in result set":
+			writeError(w, http.StatusNotFound, "Question not found: "+err.Error())
+		case strings.Contains(err.Error(), "does not belong"),
+			strings.Contains(err.Error(), "only available after quiz completion"):
+			writeError(w, http.StatusForbidden, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "Failed to get question detail: "+err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, detail)
 }
 
 // ListJobQuizzes handler lists all quiz attempts taken for a job

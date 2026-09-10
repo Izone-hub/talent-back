@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/Izone-hub/talent-backend/config"
 	"github.com/Izone-hub/talent-backend/controller"
@@ -21,7 +22,15 @@ func main() {
 	}
 
 	// Connect to database pool
-	db, err := pgxpool.New(context.Background(), cfg.GetDatabaseURL())
+	poolConfig, err := pgxpool.ParseConfig(cfg.GetDatabaseURL())
+	if err != nil {
+		log.Fatalf("Failed to parse db config: %v", err)
+	}
+	poolConfig.MaxConns = 25
+	poolConfig.MinConns = 5
+	poolConfig.MaxConnIdleTime = 5 * time.Minute
+
+	db, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}

@@ -211,60 +211,66 @@ func (s *QuizService) GetUserQuizAttempts(ctx context.Context, userID string) ([
 	return attempts, nil
 }
 
-// QuizReviewAnswer is a single answered question within a quiz attempt review.
-type QuizReviewAnswer struct {
+// QuizResultSummary is the lightweight initial response for a completed quiz attempt.
+type QuizResultSummary struct {
+	ID                uuid.UUID  `json:"id"`
+	ApplicationID     uuid.UUID  `json:"application_id"`
+	JobID             uuid.UUID  `json:"job_id"`
+	JobTitle          string     `json:"job_title"`
+	Company           string     `json:"company"`
+	Status            string     `json:"status"`
+	Score             *int32     `json:"score"`
+	Passed            *bool      `json:"passed"`
+	CorrectAnswers    *int32     `json:"correct_answers"`
+	TotalQuestions    int32      `json:"total_questions"`
+	AnsweredQuestions int32      `json:"answered_questions"`
+	PassingScore      int32      `json:"passing_score"`
+	StartedAt         *time.Time `json:"started_at"`
+	CompletedAt       *time.Time `json:"completed_at"`
+	TimeSpentSeconds  *int32     `json:"time_spent_seconds"`
+}
+
+// QuizReviewQuestionItem is a lightweight item in the question review list without answer keys.
+type QuizReviewQuestionItem struct {
+	QuestionID     uuid.UUID `json:"question_id"`
+	QuestionNumber int32     `json:"question_number"`
+	QuestionText   string    `json:"question_text"`
+	QuestionType   string    `json:"question_type"`
+	Difficulty     string    `json:"difficulty"`
+	UserAnswer     *string   `json:"user_answer"`
+	IsCorrect      *bool     `json:"is_correct"`
+	IsSkipped      bool      `json:"is_skipped"`
+	Points         *int32    `json:"points,omitempty"`
+}
+
+// QuizQuestionDetail is fetched on-demand when a user opens a specific question for review.
+type QuizQuestionDetail struct {
 	QuestionID       uuid.UUID       `json:"question_id"`
+	QuestionNumber   int32           `json:"question_number"`
 	QuestionText     string          `json:"question_text"`
 	QuestionType     string          `json:"question_type"`
 	Difficulty       string          `json:"difficulty"`
+	Points           *int32          `json:"points,omitempty"`
 	Options          json.RawMessage `json:"options"`
 	UserAnswer       *string         `json:"user_answer"`
-	CorrectAnswer    *string         `json:"correct_answer"`
+	CorrectAnswer    *string         `json:"correct_answer,omitempty"`
+	Explanation      *string         `json:"explanation,omitempty"`
 	IsCorrect        *bool           `json:"is_correct"`
 	IsSkipped        bool            `json:"is_skipped"`
-	Explanation      *string         `json:"explanation"`
 	TimeSpentSeconds int32           `json:"time_spent_seconds"`
-	CodeOutput       *string         `json:"code_output"`
-	CreatedAt        time.Time       `json:"created_at"`
+	CodeOutput       *string         `json:"code_output,omitempty"`
 }
 
-// QuizReview is the full question-by-question view of a quiz attempt,
-// including every question the applicant took for the job.
-type QuizReview struct {
-	ID                uuid.UUID         `json:"id"`
-	ApplicationID     uuid.UUID         `json:"application_id"`
-	JobApplicationID  uuid.UUID         `json:"job_application_id"`
-	UserID            uuid.UUID         `json:"user_id"`
-	JobID             uuid.UUID         `json:"job_id"`
-	JobTitle          string            `json:"job_title,omitempty"`
-	JobCompany        string            `json:"job_company,omitempty"`
-	Title             string            `json:"title"`
-	Status            string            `json:"status"`
-	Score             *int32            `json:"score"`
-	Passed            *bool             `json:"passed"`
-	CorrectAnswers    *int32            `json:"correct_answers"`
-	TotalQuestions    int32             `json:"total_questions"`
-	AnsweredQuestions int32             `json:"answered_questions"`
-	PassingScore      int32             `json:"passing_score"`
-	StartedAt         *time.Time        `json:"started_at"`
-	CompletedAt       *time.Time        `json:"completed_at"`
-	TimeSpentSeconds  *int32            `json:"time_spent_seconds"`
-	Answers           []QuizReviewAnswer `json:"answers"`
-}
-
-// GetQuizReview returns the full question-by-question review of a quiz
-// attempt. The attempt owner can always view their own attempt; admins can
-// view any attempt.
-func (s *QuizService) GetQuizReview(ctx context.Context, attemptID, requesterID string, isAdmin bool) (*QuizReview, error) {
+// GetQuizResultSummary returns the lightweight initial result summary for a completed quiz attempt.
+func (s *QuizService) GetQuizResultSummary(ctx context.Context, attemptID, requesterID string, isAdmin bool) (*QuizResultSummary, error) {
 	attemptUUID, err := uuid.Parse(attemptID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid attempt ID: %w", err)
 	}
 
-	// Load the attempt plus job context
 	var (
 		appID, userID, jobID uuid.UUID
-		jobTitle, jobCompany string
+		jobTitle, company    string
 		status               string
 		score                pgtype.Int4
 		passed               pgtype.Bool
@@ -275,23 +281,25 @@ func (s *QuizService) GetQuizReview(ctx context.Context, attemptID, requesterID 
 		startedAt            pgtype.Timestamp
 		completedAt          pgtype.Timestamp
 		timeSpent            pgtype.Int4
+		answeredQuestions    int32
 	)
 
 	err = s.pool.QueryRow(ctx, `
 		SELECT qa.application_id, qa.user_id, qa.job_id,
 		       COALESCE(j.title, 'Quiz') AS job_title,
-		       COALESCE(j.company, '') AS job_company,
+		       COALESCE(j.company, '') AS company,
 		       qa.status, qa.score, qa.passed, qa.correct_answers,
 		       qa.questions_per_quiz, qa.total_questions, qa.passing_score,
-		       qa.started_at, qa.completed_at, qa.time_spent_seconds
+		       qa.started_at, qa.completed_at, qa.time_spent_seconds,
+		       (SELECT COUNT(*)::int FROM quiz_answers WHERE quiz_attempt_id = qa.id) AS answered_questions
 		FROM quiz_attempts qa
 		LEFT JOIN jobs j ON qa.job_id = j.id
 		WHERE qa.id = $1
 	`, attemptUUID).Scan(
-		&appID, &userID, &jobID, &jobTitle, &jobCompany, &status,
+		&appID, &userID, &jobID, &jobTitle, &company, &status,
 		&score, &passed, &correctAnswers,
 		&questionsPerQuiz, &totalQuestions, &passingScore,
-		&startedAt, &completedAt, &timeSpent,
+		&startedAt, &completedAt, &timeSpent, &answeredQuestions,
 	)
 	if err != nil {
 		return nil, err
@@ -306,14 +314,81 @@ func (s *QuizService) GetQuizReview(ctx context.Context, attemptID, requesterID 
 		if userID != requesterUUID {
 			return nil, fmt.Errorf("quiz attempt does not belong to this user")
 		}
+		if status != "completed" {
+			return nil, fmt.Errorf("quiz results are only available after quiz completion")
+		}
 	}
 
-	// Load every question the applicant answered for this attempt
+	totalQ := questionsPerQuiz
+	if totalQ <= 0 {
+		totalQ = totalQuestions
+	}
+
+	return &QuizResultSummary{
+		ID:                attemptUUID,
+		ApplicationID:     appID,
+		JobID:             jobID,
+		JobTitle:          jobTitle,
+		Company:           company,
+		Status:            status,
+		Score:             int4Ptr(score),
+		Passed:            boolPtr(passed),
+		CorrectAnswers:    int4Ptr(correctAnswers),
+		TotalQuestions:    totalQ,
+		AnsweredQuestions: answeredQuestions,
+		PassingScore:      passingScore,
+		StartedAt:         timestampPtr(startedAt),
+		CompletedAt:       timestampPtr(completedAt),
+		TimeSpentSeconds:  int4Ptr(timeSpent),
+	}, nil
+}
+
+// GetQuizReview returns the lightweight quiz result summary.
+func (s *QuizService) GetQuizReview(ctx context.Context, attemptID, requesterID string, isAdmin bool) (*QuizResultSummary, error) {
+	return s.GetQuizResultSummary(ctx, attemptID, requesterID, isAdmin)
+}
+
+// GetQuizReviewQuestions returns the lightweight question review list (no correct answers or explanations).
+func (s *QuizService) GetQuizReviewQuestions(ctx context.Context, attemptID, requesterID string, isAdmin bool) ([]QuizReviewQuestionItem, error) {
+	attemptUUID, err := uuid.Parse(attemptID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid attempt ID: %w", err)
+	}
+
+	var (
+		userID uuid.UUID
+		status string
+	)
+	err = s.pool.QueryRow(ctx, `
+		SELECT user_id, status FROM quiz_attempts WHERE id = $1
+	`, attemptUUID).Scan(&userID, &status)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isAdmin {
+		requesterUUID, err := uuid.Parse(requesterID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid requester ID: %w", err)
+		}
+		if userID != requesterUUID {
+			return nil, fmt.Errorf("quiz attempt does not belong to this user")
+		}
+		if status != "completed" {
+			return nil, fmt.Errorf("quiz review is only available after quiz completion")
+		}
+	}
+
 	rows, err := s.pool.Query(ctx, `
-		SELECT q.id, q.question_text, q.question_type, q.difficulty, q.options,
-		       q.correct_answer, q.explanation,
-		       qa.user_answer, qa.is_correct, qa.is_skipped,
-		       qa.time_spent_seconds, qa.code_output, qa.created_at
+		SELECT q.id,
+		       COALESCE(qaq.question_order, 0) AS question_order,
+		       q.question_text,
+		       q.question_type,
+		       q.difficulty,
+		       q.points,
+		       qa.user_answer,
+		       qa.is_correct,
+		       qa.is_skipped
 		FROM quiz_answers qa
 		JOIN questions q ON q.id = qa.question_id
 		LEFT JOIN quiz_attempt_questions qaq ON qaq.quiz_attempt_id = qa.quiz_attempt_id AND qaq.question_id = qa.question_id
@@ -325,68 +400,143 @@ func (s *QuizService) GetQuizReview(ctx context.Context, attemptID, requesterID 
 	}
 	defer rows.Close()
 
-	answers := make([]QuizReviewAnswer, 0)
+	items := make([]QuizReviewQuestionItem, 0)
+	idx := int32(1)
 	for rows.Next() {
-		var a QuizReviewAnswer
-		var questionID uuid.UUID
-		var options []byte
-		var userAnswer, correctAnswer, explanation, codeOutput *string
-		var isCorrect *bool
-		var isSkipped bool
-		var timeSpentSeconds int32
-		var createdAt time.Time
+		var item QuizReviewQuestionItem
+		var qOrder int32
+		var points pgtype.Int4
 
 		if err := rows.Scan(
-			&questionID, &a.QuestionText, &a.QuestionType, &a.Difficulty, &options,
-			&correctAnswer, &explanation,
-			&userAnswer, &isCorrect, &isSkipped,
-			&timeSpentSeconds, &codeOutput, &createdAt,
+			&item.QuestionID,
+			&qOrder,
+			&item.QuestionText,
+			&item.QuestionType,
+			&item.Difficulty,
+			&points,
+			&item.UserAnswer,
+			&item.IsCorrect,
+			&item.IsSkipped,
 		); err != nil {
 			return nil, err
 		}
 
-		a.QuestionID = questionID
-		a.UserAnswer = userAnswer
-		a.CorrectAnswer = correctAnswer
-		a.IsCorrect = isCorrect
-		a.IsSkipped = isSkipped
-		a.Explanation = explanation
-		a.TimeSpentSeconds = timeSpentSeconds
-		a.CodeOutput = codeOutput
-		a.CreatedAt = createdAt
-		if options == nil {
-			a.Options = json.RawMessage(`[]`)
+		if qOrder > 0 {
+			item.QuestionNumber = qOrder
 		} else {
-			a.Options = json.RawMessage(options)
+			item.QuestionNumber = idx
 		}
+		item.Points = int4Ptr(points)
 
-		answers = append(answers, a)
+		items = append(items, item)
+		idx++
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	return &QuizReview{
-		ID:                attemptUUID,
-		ApplicationID:     appID,
-		JobApplicationID:  appID,
-		UserID:            userID,
-		JobID:             jobID,
-		JobTitle:          jobTitle,
-		JobCompany:        jobCompany,
-		Title:             jobTitle,
-		Status:            status,
-		Score:             int4Ptr(score),
-		Passed:            boolPtr(passed),
-		CorrectAnswers:    int4Ptr(correctAnswers),
-		TotalQuestions:    questionsPerQuiz,
-		AnsweredQuestions: int32(len(answers)),
-		PassingScore:      passingScore,
-		StartedAt:         timestampPtr(startedAt),
-		CompletedAt:       timestampPtr(completedAt),
-		TimeSpentSeconds:  int4Ptr(timeSpent),
-		Answers:           answers,
-	}, nil
+	return items, nil
+}
+
+// GetQuizQuestionDetail returns full details (options, correct answer, explanation, code output) for a single question.
+func (s *QuizService) GetQuizQuestionDetail(ctx context.Context, attemptID, questionID, requesterID string, isAdmin bool) (*QuizQuestionDetail, error) {
+	attemptUUID, err := uuid.Parse(attemptID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid attempt ID: %w", err)
+	}
+	qUUID, err := uuid.Parse(questionID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid question ID: %w", err)
+	}
+
+	var (
+		userID uuid.UUID
+		status string
+	)
+	err = s.pool.QueryRow(ctx, `
+		SELECT user_id, status FROM quiz_attempts WHERE id = $1
+	`, attemptUUID).Scan(&userID, &status)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isAdmin {
+		requesterUUID, err := uuid.Parse(requesterID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid requester ID: %w", err)
+		}
+		if userID != requesterUUID {
+			return nil, fmt.Errorf("quiz attempt does not belong to this user")
+		}
+		if status != "completed" {
+			return nil, fmt.Errorf("question details are only available after quiz completion")
+		}
+	}
+
+	var (
+		detail           QuizQuestionDetail
+		qOrder           int32
+		points           pgtype.Int4
+		optionsRaw       []byte
+		timeSpentSeconds int32
+		codeOutput       *string
+	)
+
+	err = s.pool.QueryRow(ctx, `
+		SELECT q.id,
+		       COALESCE(qaq.question_order, 1) AS question_order,
+		       q.question_text,
+		       q.question_type,
+		       q.difficulty,
+		       q.points,
+		       q.options,
+		       q.correct_answer,
+		       q.explanation,
+		       qa.user_answer,
+		       qa.is_correct,
+		       qa.is_skipped,
+		       qa.time_spent_seconds,
+		       qa.code_output
+		FROM quiz_answers qa
+		JOIN questions q ON q.id = qa.question_id
+		LEFT JOIN quiz_attempt_questions qaq ON qaq.quiz_attempt_id = qa.quiz_attempt_id AND qaq.question_id = qa.question_id
+		WHERE qa.quiz_attempt_id = $1 AND qa.question_id = $2
+	`, attemptUUID, qUUID).Scan(
+		&detail.QuestionID,
+		&qOrder,
+		&detail.QuestionText,
+		&detail.QuestionType,
+		&detail.Difficulty,
+		&points,
+		&optionsRaw,
+		&detail.CorrectAnswer,
+		&detail.Explanation,
+		&detail.UserAnswer,
+		&detail.IsCorrect,
+		&detail.IsSkipped,
+		&timeSpentSeconds,
+		&codeOutput,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	detail.QuestionNumber = qOrder
+	detail.Points = int4Ptr(points)
+	detail.TimeSpentSeconds = timeSpentSeconds
+
+	if optionsRaw != nil {
+		detail.Options = sanitizeQuizOptions(json.RawMessage(optionsRaw))
+	} else {
+		detail.Options = json.RawMessage(`[]`)
+	}
+
+	// For coding questions, return code_output if present and non-empty
+	if detail.QuestionType == "coding_challenge" || (codeOutput != nil && *codeOutput != "") {
+		detail.CodeOutput = codeOutput
+	}
+
+	return &detail, nil
 }
 
 // GetUserQuizzes retrieves all quiz attempts belonging to a specific user
@@ -765,12 +915,15 @@ func (s *QuizService) selectQuizQuestions(ctx context.Context, jobID uuid.UUID) 
 
 // StartQuizResponse represents the result of starting or resuming a quiz attempt
 type StartQuizResponse struct {
-	Message        string                 `json:"message"`
-	AttemptID      string                 `json:"attempt_id"`
-	Status         string                 `json:"status"`
-	Question       map[string]interface{} `json:"question,omitempty"`
-	QuestionNumber int                    `json:"question_number,omitempty"`
-	TotalQuestions int                    `json:"total_questions,omitempty"`
+	Message          string                 `json:"message"`
+	AttemptID        string                 `json:"attempt_id"`
+	Status           string                 `json:"status"`
+	Question         map[string]interface{} `json:"question,omitempty"`
+	QuestionNumber   int                    `json:"question_number,omitempty"`
+	TotalQuestions   int                    `json:"total_questions,omitempty"`
+	Answered         int                    `json:"answered"`
+	Skipped          int                    `json:"skipped"`
+	RemainingSeconds int                    `json:"remaining_seconds"`
 }
 
 // StartQuizAttempt initializes or resumes an active quiz session in PostgreSQL
@@ -923,13 +1076,29 @@ func (s *QuizService) StartQuizAttempt(ctx context.Context, attemptID, userID, a
 			totalQ = t
 		}
 
+		ans := 0
+		skp := 0
+		remSec := 0
+		if a, ok := currentQ["answered"].(int); ok {
+			ans = a
+		}
+		if s, ok := currentQ["skipped"].(int); ok {
+			skp = s
+		}
+		if r, ok := currentQ["remaining_seconds"].(int); ok {
+			remSec = r
+		}
+
 		return &StartQuizResponse{
-			Message:        "Quiz resumed successfully",
-			AttemptID:      existingID.String(),
-			Status:         existingStatus,
-			Question:       currentQ,
-			QuestionNumber: qNum,
-			TotalQuestions: totalQ,
+			Message:          "Quiz resumed successfully",
+			AttemptID:        existingID.String(),
+			Status:           existingStatus,
+			Question:         currentQ,
+			QuestionNumber:   qNum,
+			TotalQuestions:   totalQ,
+			Answered:         ans,
+			Skipped:          skp,
+			RemainingSeconds: remSec,
 		}, nil
 	}
 
@@ -1000,14 +1169,78 @@ func (s *QuizService) StartQuizAttempt(ctx context.Context, attemptID, userID, a
 		return nil, fmt.Errorf("failed to retrieve first question: %w", err)
 	}
 
+	ans := 0
+	skp := 0
+	remSec := 0
+	if a, ok := firstQ["answered"].(int); ok {
+		ans = a
+	}
+	if s, ok := firstQ["skipped"].(int); ok {
+		skp = s
+	}
+	if r, ok := firstQ["remaining_seconds"].(int); ok {
+		remSec = r
+	}
+
 	return &StartQuizResponse{
-		Message:        "Quiz started successfully",
-		AttemptID:      attemptUUID.String(),
-		Status:         "in_progress",
-		Question:       firstQ,
-		QuestionNumber: 1,
-		TotalQuestions: 10,
+		Message:          "Quiz started successfully",
+		AttemptID:        attemptUUID.String(),
+		Status:           "in_progress",
+		Question:         firstQ,
+		QuestionNumber:   1,
+		TotalQuestions:   10,
+		Answered:         ans,
+		Skipped:          skp,
+		RemainingSeconds: remSec,
 	}, nil
+}
+
+// sanitizeQuizOptions strips any answer-revealing fields from question options.
+// For multiple-choice questions, only available option identifiers and display text are returned.
+func sanitizeQuizOptions(optionsRaw json.RawMessage) json.RawMessage {
+	if len(optionsRaw) == 0 || string(optionsRaw) == "null" {
+		return json.RawMessage(`[]`)
+	}
+
+	rawBytes := []byte(optionsRaw)
+	var strVal string
+	if err := json.Unmarshal(optionsRaw, &strVal); err == nil {
+		rawBytes = []byte(strVal)
+	}
+
+	// Try unmarshaling as slice of objects (e.g. [{"option": "A", "text": "...", "is_correct": true}])
+	var objList []map[string]interface{}
+	if err := json.Unmarshal(rawBytes, &objList); err == nil {
+		sanitizedList := make([]map[string]interface{}, len(objList))
+		for i, item := range objList {
+			cleanItem := make(map[string]interface{})
+			for k, v := range item {
+				lk := strings.ToLower(k)
+				if lk == "is_correct" || lk == "iscorrect" || lk == "correct" ||
+					lk == "is_answer" || lk == "isanswer" || lk == "answer" ||
+					lk == "correct_answer" || lk == "correctanswer" || lk == "explanation" {
+					continue
+				}
+				cleanItem[k] = v
+			}
+			sanitizedList[i] = cleanItem
+		}
+		res, err := json.Marshal(sanitizedList)
+		if err == nil {
+			return json.RawMessage(res)
+		}
+	}
+
+	// Try unmarshaling as slice of strings (e.g. ["Option A", "Option B"])
+	var strList []string
+	if err := json.Unmarshal(rawBytes, &strList); err == nil {
+		res, err := json.Marshal(strList)
+		if err == nil {
+			return json.RawMessage(res)
+		}
+	}
+
+	return optionsRaw
 }
 
 // GetNextQuestion retrieves the next persisted unanswered question for this attempt
@@ -1028,12 +1261,14 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		status           string
 		questionsPerQuiz int
 		totalQuestions   int
+		timeLimitMinutes int
+		startedAt        pgtype.Timestamp
 	)
 	err = s.pool.QueryRow(ctx, `
-		SELECT user_id, job_id, status, questions_per_quiz, total_questions
+		SELECT user_id, job_id, status, questions_per_quiz, total_questions, COALESCE(time_limit_minutes, 0), started_at
 		FROM quiz_attempts
 		WHERE id = $1
-	`, attemptUUID).Scan(&qaUserID, &qaJobID, &status, &questionsPerQuiz, &totalQuestions)
+	`, attemptUUID).Scan(&qaUserID, &qaJobID, &status, &questionsPerQuiz, &totalQuestions, &timeLimitMinutes, &startedAt)
 	if err != nil {
 		return nil, fmt.Errorf("quiz attempt not found: %w", err)
 	}
@@ -1049,7 +1284,23 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		limitCount = 10
 	}
 
-	// 2. Check status
+	// 2. Calculate lightweight answer counters efficiently (answered and skipped; correctness is kept internal to DB)
+	var (
+		skippedCount  int
+		answeredCount int
+	)
+	err = s.pool.QueryRow(ctx, `
+		SELECT 
+			COUNT(*) FILTER (WHERE qa.is_skipped = true),
+			COUNT(*)
+		FROM quiz_answers qa
+		WHERE qa.quiz_attempt_id = $1
+	`, attemptUUID).Scan(&skippedCount, &answeredCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count answered questions: %w", err)
+	}
+
+	// 3. Check status
 	if status == "completed" {
 		return map[string]interface{}{
 			"status":              "finished",
@@ -1057,6 +1308,9 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 			"attempt_id":          attemptID,
 			"question_number":     limitCount,
 			"total_questions":     limitCount,
+			"answered":            answeredCount,
+			"skipped":             skippedCount,
+			"remaining_seconds":   0,
 			"remaining_questions": 0,
 			"is_last_question":    true,
 		}, nil
@@ -1068,6 +1322,9 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 			"attempt_id":          attemptID,
 			"question_number":     limitCount,
 			"total_questions":     limitCount,
+			"answered":            answeredCount,
+			"skipped":             skippedCount,
+			"remaining_seconds":   0,
 			"remaining_questions": 0,
 			"is_last_question":    true,
 		}, nil
@@ -1081,12 +1338,30 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 			"attempt_id":          attemptID,
 			"question_number":     0,
 			"total_questions":     limitCount,
+			"answered":            0,
+			"skipped":             0,
+			"remaining_seconds":   0,
 			"remaining_questions": limitCount,
 			"is_last_question":    false,
 		}, nil
 	}
 
-	// 3. Ensure persistent sequence exists in quiz_attempt_questions (backfill on the fly if 0)
+	if answeredCount >= limitCount {
+		return map[string]interface{}{
+			"status":              "finished",
+			"message":             "You have answered all questions in this quiz",
+			"attempt_id":          attemptID,
+			"question_number":     limitCount,
+			"total_questions":     limitCount,
+			"answered":            answeredCount,
+			"skipped":             skippedCount,
+			"remaining_seconds":   0,
+			"remaining_questions": 0,
+			"is_last_question":    true,
+		}, nil
+	}
+
+	// 4. Ensure persistent sequence exists in quiz_attempt_questions (backfill on the fly if 0)
 	var qaqCount int
 	err = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM quiz_attempt_questions WHERE quiz_attempt_id = $1
@@ -1116,40 +1391,27 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 
 	if qaqCount == 0 {
 		return map[string]interface{}{
-			"status":  "finished",
-			"message": "No more questions available or quiz completed",
-		}, nil
-	}
-
-	// 4. Count answered questions
-	var answeredCount int
-	err = s.pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM quiz_answers WHERE quiz_attempt_id = $1
-	`, attemptUUID).Scan(&answeredCount)
-	if err != nil {
-		return nil, fmt.Errorf("failed to count answered questions: %w", err)
-	}
-
-	if answeredCount >= limitCount {
-		return map[string]interface{}{
 			"status":              "finished",
-			"message":             "You have answered all questions in this quiz",
+			"message":             "No more questions available or quiz completed",
 			"attempt_id":          attemptID,
 			"question_number":     limitCount,
 			"total_questions":     limitCount,
+			"answered":            answeredCount,
+			"skipped":             skippedCount,
+			"remaining_seconds":   0,
 			"remaining_questions": 0,
 			"is_last_question":    true,
 		}, nil
 	}
 
-	// 5. Retrieve next unanswered question from persisted quiz_attempt_questions
+	// 5. Retrieve next unanswered question from persisted quiz_attempt_questions.
+	// NOTE: correct_answer is kept strictly server-side and never returned during an active quiz.
 	var (
 		questionOrder    int
 		id               uuid.UUID
 		qText, qType     string
 		difficulty       string
 		options          *string
-		correctAnswer    *string
 		timeLimitSeconds int
 	)
 	err = s.pool.QueryRow(ctx, `
@@ -1159,7 +1421,6 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 			q.question_text,
 			q.question_type::text,
 			q.options::text,
-			q.correct_answer,
 			q.difficulty::text,
 			q.time_limit_seconds
 		FROM quiz_attempt_questions qaq
@@ -1172,7 +1433,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		  )
 		ORDER BY qaq.question_order ASC
 		LIMIT 1
-	`, attemptUUID).Scan(&questionOrder, &id, &qText, &qType, &options, &correctAnswer, &difficulty, &timeLimitSeconds)
+	`, attemptUUID).Scan(&questionOrder, &id, &qText, &qType, &options, &difficulty, &timeLimitSeconds)
 	if err != nil {
 		if strings.Contains(err.Error(), "no rows") {
 			return map[string]interface{}{
@@ -1181,6 +1442,9 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 				"attempt_id":          attemptID,
 				"question_number":     limitCount,
 				"total_questions":     limitCount,
+				"answered":            answeredCount,
+				"skipped":             skippedCount,
+				"remaining_seconds":   0,
 				"remaining_questions": 0,
 				"is_last_question":    true,
 			}, nil
@@ -1191,7 +1455,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 
 	var optionsRaw json.RawMessage
 	if options != nil {
-		optionsRaw = json.RawMessage(*options)
+		optionsRaw = sanitizeQuizOptions(json.RawMessage(*options))
 	} else {
 		optionsRaw = json.RawMessage(`[]`)
 	}
@@ -1240,19 +1504,43 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	remaining := limitCount - answeredCount
 	isLast := questionOrder >= limitCount
 
+	remainingSeconds := timeLimitSeconds
+	if timeLimitMinutes > 0 && startedAt.Valid {
+		totalSec := timeLimitMinutes * 60
+		elapsed := int(time.Since(startedAt.Time).Seconds())
+		rem := totalSec - elapsed
+		if rem < 0 {
+			rem = 0
+		}
+		remainingSeconds = rem
+	} else if timeLimitSeconds > 0 {
+		remainingSeconds = timeLimitSeconds
+	}
+
 	qObj := map[string]interface{}{
 		"id":                 id.String(),
+		"text":               qText,
 		"question_text":      qText,
+		"type":               qType,
 		"question_type":      qType,
 		"difficulty":         difficulty,
 		"time_limit_seconds": timeLimitSeconds,
 		"options":            optionsRaw,
+		"status":             "unanswered",
 	}
 	if codingDetails != nil {
 		qObj["coding_details"] = codingDetails
 	}
 
 	resp := map[string]interface{}{
+		"question_number":     questionOrder,
+		"total_questions":     limitCount,
+		"answered":            answeredCount,
+		"skipped":             skippedCount,
+		"remaining_seconds":   remainingSeconds,
+		"remaining_questions": remaining,
+		"is_last_question":    isLast,
+		"status":              status,
 		"attempt_id":          attemptID,
 		"id":                  id.String(),
 		"question_text":       qText,
@@ -1261,11 +1549,6 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		"time_limit_seconds":  timeLimitSeconds,
 		"options":             optionsRaw,
 		"question":            qObj,
-		"question_number":     questionOrder,
-		"total_questions":     limitCount,
-		"remaining_questions": remaining,
-		"is_last_question":    isLast,
-		"status":              status,
 	}
 	if codingDetails != nil {
 		resp["coding_details"] = codingDetails
@@ -1633,6 +1916,7 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 		}
 
 		isCorrect := resp.Passed != nil && *resp.Passed
+		var codeOutput *string = nil
 		_, upsertErr := s.pool.Exec(ctx, `
 			INSERT INTO quiz_answers (quiz_attempt_id, question_id, user_answer, is_correct, code_output, execution_time_ms, save_count, last_saved_at)
 			VALUES ($1, $2, $3, $4, $5, $6, 1, NOW())
@@ -1644,7 +1928,7 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 				save_count = quiz_answers.save_count + 1,
 				last_saved_at = NOW(),
 				updated_at = NOW()
-		`, attemptID, questionUUID, code, isCorrect, resp.Stdout, resp.TimeMs)
+		`, attemptID, questionUUID, code, isCorrect, codeOutput, resp.TimeMs)
 		if upsertErr != nil {
 			log.Printf("RunQuizCode: failed to save quiz_answer: %v", upsertErr)
 		}
@@ -1673,6 +1957,7 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 
 	// Save result to quiz_answers
 	isCorrect := resp.Passed != nil && *resp.Passed
+	var codeOutput *string = nil
 	_, upsertErr := s.pool.Exec(ctx, `
 		INSERT INTO quiz_answers (quiz_attempt_id, question_id, user_answer, is_correct, code_output, execution_time_ms, save_count, last_saved_at)
 		VALUES ($1, $2, $3, $4, $5, $6, 1, NOW())
@@ -1684,7 +1969,7 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 			save_count = quiz_answers.save_count + 1,
 			last_saved_at = NOW(),
 			updated_at = NOW()
-	`, attemptID, questionUUID, code, isCorrect, resp.Stdout, resp.TimeMs)
+	`, attemptID, questionUUID, code, isCorrect, codeOutput, resp.TimeMs)
 	if upsertErr != nil {
 		log.Printf("RunQuizCode: failed to save quiz_answer: %v", upsertErr)
 	}

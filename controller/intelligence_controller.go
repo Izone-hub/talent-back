@@ -89,12 +89,29 @@ type AISummaryResponse struct {
 	Model      string `json:"model"`
 }
 
+type IntelligenceQuizAnswer struct {
+	ID               pgtype.UUID      `json:"id"`
+	QuizAttemptID    pgtype.UUID      `json:"quiz_attempt_id"`
+	QuestionID       pgtype.UUID      `json:"question_id"`
+	UserAnswer       pgtype.Text      `json:"user_answer"`
+	IsCorrect        pgtype.Bool      `json:"is_correct"`
+	LastSavedAt      pgtype.Timestamp `json:"last_saved_at"`
+	SaveCount        pgtype.Int4      `json:"save_count"`
+	TimeSpentSeconds pgtype.Int4      `json:"time_spent_seconds"`
+	ExecutionTimeMs  pgtype.Int4      `json:"execution_time_ms"`
+	MemoryUsedMb     pgtype.Float8    `json:"memory_used_mb"`
+	IsSkipped        pgtype.Bool      `json:"is_skipped"`
+	IsReviewed       pgtype.Bool      `json:"is_reviewed"`
+	CreatedAt        pgtype.Timestamp `json:"created_at"`
+	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+}
+
 type IntelligenceReport struct {
-	UserID      uuid.UUID             `json:"user_id"`
-	GitHub      GitHubIntelligence    `json:"github_intelligence"`
-	CVSignals   *CVSignalsResponse    `json:"cv_signals,omitempty"`
-	AISummary   *AISummaryResponse    `json:"ai_summary,omitempty"`
-	QuizAnswers []database.QuizAnswer `json:"quiz_answers,omitempty"`
+	UserID      uuid.UUID                `json:"user_id"`
+	GitHub      GitHubIntelligence       `json:"github_intelligence"`
+	CVSignals   *CVSignalsResponse       `json:"cv_signals,omitempty"`
+	AISummary   *AISummaryResponse       `json:"ai_summary,omitempty"`
+	QuizAnswers []IntelligenceQuizAnswer `json:"quiz_answers,omitempty"`
 }
 
 // --- Handler ---
@@ -188,10 +205,29 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 		}
 	}
 
-	// 7. Attach quiz answers if available
+	// 7. Attach quiz answers if available (excluding code_output)
 	quizAnswers, err := c.queries.GetUserQuizAnswers(r.Context(), pgID)
 	if err == nil {
-		report.QuizAnswers = quizAnswers
+		cleanAnswers := make([]IntelligenceQuizAnswer, len(quizAnswers))
+		for i, a := range quizAnswers {
+			cleanAnswers[i] = IntelligenceQuizAnswer{
+				ID:               a.ID,
+				QuizAttemptID:    a.QuizAttemptID,
+				QuestionID:       a.QuestionID,
+				UserAnswer:       a.UserAnswer,
+				IsCorrect:        a.IsCorrect,
+				LastSavedAt:      a.LastSavedAt,
+				SaveCount:        a.SaveCount,
+				TimeSpentSeconds: a.TimeSpentSeconds,
+				ExecutionTimeMs:  a.ExecutionTimeMs,
+				MemoryUsedMb:     a.MemoryUsedMb,
+				IsSkipped:        a.IsSkipped,
+				IsReviewed:       a.IsReviewed,
+				CreatedAt:        a.CreatedAt,
+				UpdatedAt:        a.UpdatedAt,
+			}
+		}
+		report.QuizAnswers = cleanAnswers
 	}
 
 	w.Header().Set("Content-Type", "application/json")

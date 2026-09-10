@@ -239,12 +239,11 @@ func (s *QuizResultFeedbackService) GetByApplication(ctx context.Context, applic
 	row := s.db.QueryRow(ctx, `
 		SELECT qrf.id, qrf.user_id, qrf.quiz_attempt_id, qrf.rating, qrf.comment, qrf.created_at, qrf.updated_at
 		FROM quiz_result_feedback qrf
-		JOIN job_applications ja ON ja.id = $1
-		LEFT JOIN quiz_attempts qa ON qa.id = qrf.quiz_attempt_id
-		WHERE (ja.quiz_id IS NOT NULL AND qrf.quiz_attempt_id = ja.quiz_id)
-		   OR (qa.id IS NOT NULL AND qa.application_id = ja.id)
-		   OR (qa.id IS NOT NULL AND qa.id = ja.quiz_id)
-		   OR (qa.id IS NOT NULL AND qa.user_id = ja.user_id AND qa.job_id = ja.job_id)
+		WHERE qrf.quiz_attempt_id IN (
+			SELECT id FROM quiz_attempts WHERE application_id = $1
+			UNION
+			SELECT quiz_id FROM job_applications WHERE id = $1 AND quiz_id IS NOT NULL
+		)
 		ORDER BY qrf.created_at DESC
 		LIMIT 1
 	`, applicationID)

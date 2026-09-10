@@ -95,6 +95,9 @@ func (c *ApplicationController) GetJobApplications(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if apps == nil {
+		apps = []database.ListApplicationsByJobRow{}
+	}
 
 	writeJSON(w, http.StatusOK, apps)
 }

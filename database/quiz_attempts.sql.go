@@ -778,7 +778,7 @@ SELECT
     qa.id, qa.quiz_attempt_id, qa.question_id, qa.user_answer, qa.is_correct, qa.last_saved_at, qa.save_count, qa.time_spent_seconds, qa.code_output, qa.execution_time_ms, qa.memory_used_mb, qa.is_skipped, qa.is_reviewed, qa.created_at, qa.updated_at
 FROM quiz_answers qa
 JOIN quiz_attempts qat ON qa.quiz_attempt_id = qat.id
-WHERE qat.user_id = $1
+WHERE qat.user_id = $1 AND qat.status = 'completed'
 ORDER BY qa.created_at DESC
 `
 

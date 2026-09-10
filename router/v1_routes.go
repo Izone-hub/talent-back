@@ -104,7 +104,7 @@ func V1Routes(
 	mux.HandleFunc("POST /api/v1/tags/assign", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.AssignTagToJob)))
 	mux.HandleFunc("POST /api/v1/tags/remove", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.RemoveTagFromJob)))
 	mux.HandleFunc("GET /api/v1/tags/{id}/jobs", authMiddleware.Authenticate(tagController.GetTagJobs))
-	mux.HandleFunc("GET /api/v1/tags/{id}/questions", authMiddleware.Authenticate(tagController.GetTagQuestions))
+	mux.HandleFunc("GET /api/v1/tags/{id}/questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.GetTagQuestions)))
 	mux.HandleFunc("GET /api/v1/jobs/{id}/tags", authMiddleware.Authenticate(tagController.GetJobTags))
 
 	// -----------------------------------------------------------------------
@@ -123,9 +123,9 @@ func V1Routes(
 
 	mux.HandleFunc("DELETE /api/v1/questions/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.DeleteQuestion)))
 
-	mux.HandleFunc("POST /api/v1/questions/{id}/test", authMiddleware.Authenticate(questionController.TestQuestion))
+	mux.HandleFunc("POST /api/v1/questions/{id}/test", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.TestQuestion)))
 
-	mux.HandleFunc("POST /api/v1/questions/{id}/validate", authMiddleware.Authenticate(questionController.ValidateQuestion))
+	mux.HandleFunc("POST /api/v1/questions/{id}/validate", authMiddleware.Authenticate(authMiddleware.RequireAdmin(questionController.ValidateQuestion)))
 
 	// -----------------------------------------------------------------------
 	// Quiz routes
@@ -151,8 +151,14 @@ func V1Routes(
 	// 7. Finish and score the quiz
 	mux.HandleFunc("POST /api/v1/quizzes/{id}/submit", authMiddleware.Authenticate(quizController.SubmitQuiz))
 
-	// 8. Full question-by-question review of an attempt (owner or admin)
+	// 8. Quiz results & review routes
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/result", authMiddleware.Authenticate(quizController.GetQuizResult))
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/summary", authMiddleware.Authenticate(quizController.GetQuizResult))
 	mux.HandleFunc("GET /api/v1/quizzes/{id}/review", authMiddleware.Authenticate(quizController.GetQuizReview))
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/review-questions", authMiddleware.Authenticate(quizController.GetQuizReviewQuestions))
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/questions", authMiddleware.Authenticate(quizController.GetQuizReviewQuestions))
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/questions/{questionId}", authMiddleware.Authenticate(quizController.GetQuizQuestionDetail))
+	mux.HandleFunc("GET /api/v1/quizzes/{id}/review/{questionId}", authMiddleware.Authenticate(quizController.GetQuizQuestionDetail))
 
 	// Example registration in main.go
 	mux.HandleFunc("GET /api/v1/quizzes/{id}/next", authMiddleware.Authenticate(quizController.GetNextQuestion))

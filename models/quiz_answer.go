@@ -15,7 +15,7 @@ type QuizAnswer struct {
 	LastSavedAt      time.Time `json:"last_saved_at" db:"last_saved_at"`
 	SaveCount        int       `json:"save_count" db:"save_count"`
 	TimeSpentSeconds int       `json:"time_spent_seconds" db:"time_spent_seconds"`
-	CodeOutput       *string   `json:"code_output,omitempty" db:"code_output"`
+	CodeOutput       *string   `json:"-" db:"code_output"`
 	ExecutionTimeMs  *int      `json:"execution_time_ms,omitempty" db:"execution_time_ms"`
 	MemoryUsedMb     *float64  `json:"memory_used_mb,omitempty" db:"memory_used_mb"`
 	IsSkipped        bool      `json:"is_skipped" db:"is_skipped"`
