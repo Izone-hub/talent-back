@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/Izone-hub/talent-backend/models"
 	"github.com/Izone-hub/talent-backend/service"
@@ -19,6 +20,7 @@ func NewSandboxController(sandboxService *service.SandboxService) *SandboxContro
 }
 
 func (c *SandboxController) Execute(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req models.ExecuteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
@@ -33,10 +35,22 @@ func (c *SandboxController) Execute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
+	if len(req.Code) > 65536 {
+		writeError(w, http.StatusBadRequest, "Code size exceeds maximum limit of 64KB")
+		return
+	}
 
 	result, err := c.sandboxService.Execute(r.Context(), req)
 	if err != nil {
+		if strings.Contains(err.Error(), "capacity reached") {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result != nil && strings.Contains(result.Error, "capacity reached") {
+		writeError(w, http.StatusServiceUnavailable, result.Error)
 		return
 	}
 
@@ -70,6 +84,7 @@ func (c *SandboxController) ListLanguages(w http.ResponseWriter, r *http.Request
 }
 
 func (c *SandboxController) ParseCode(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req models.ParseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
@@ -84,10 +99,22 @@ func (c *SandboxController) ParseCode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
+	if len(req.Code) > 65536 {
+		writeError(w, http.StatusBadRequest, "Code size exceeds maximum limit of 64KB")
+		return
+	}
 
 	result, err := c.sandboxService.ParseCode(r.Context(), req)
 	if err != nil {
+		if strings.Contains(err.Error(), "capacity reached") {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result != nil && strings.Contains(result.Error, "capacity reached") {
+		writeError(w, http.StatusServiceUnavailable, result.Error)
 		return
 	}
 

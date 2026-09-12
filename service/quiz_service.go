@@ -80,17 +80,31 @@ type JobQuizAttempt struct {
 
 // GetJobQuizAttempts lists all quiz attempts taken for a given job (admin
 // view), including the applicant data and optional AI quiz results.
-func (s *QuizService) GetJobQuizAttempts(ctx context.Context, jobID string) ([]JobQuizAttempt, error) {
+func (s *QuizService) GetJobQuizAttempts(ctx context.Context, jobID string, limit, offset int32) ([]JobQuizAttempt, error) {
 	jobUUID, err := uuid.Parse(jobID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid job ID: %w", err)
+	}
+
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	var pgJobID pgtype.UUID
 	copy(pgJobID.Bytes[:], jobUUID[:])
 	pgJobID.Valid = true
 
-	rows, err := s.queries.ListQuizAttemptsByJob(ctx, pgJobID)
+	rows, err := s.queries.ListQuizAttemptsByJob(ctx, database.ListQuizAttemptsByJobParams{
+		JobID:  pgJobID,
+		Limit:  limit,
+		Offset: offset,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -146,17 +160,31 @@ func (s *QuizService) GetJobQuizAttempts(ctx context.Context, jobID string) ([]J
 // GetUserQuizAttempts lists all quiz attempts taken by a given user across
 // all jobs (admin view), including job info, applicant data and optional AI
 // quiz results.
-func (s *QuizService) GetUserQuizAttempts(ctx context.Context, userID string) ([]JobQuizAttempt, error) {
+func (s *QuizService) GetUserQuizAttempts(ctx context.Context, userID string, limit, offset int32) ([]JobQuizAttempt, error) {
 	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	var pgUserID pgtype.UUID
 	copy(pgUserID.Bytes[:], userUUID[:])
 	pgUserID.Valid = true
 
-	rows, err := s.queries.ListQuizAttemptsByUser(ctx, pgUserID)
+	rows, err := s.queries.ListQuizAttemptsByUser(ctx, database.ListQuizAttemptsByUserParams{
+		UserID: pgUserID,
+		Limit:  limit,
+		Offset: offset,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -574,8 +602,8 @@ func (s *QuizService) GetUserQuizzes(ctx context.Context, userID string) ([]Quiz
 	return quizzes, nil
 }
 
-// GetQuizAttempt fetches the attempt configuration and metadata, verifying user ownership
-func (s *QuizService) GetQuizAttempt(ctx context.Context, attemptID string, userID string) (*QuizAttempt, error) {
+// GetQuizAttempt fetches the attempt configuration and metadata, verifying user ownership or admin access
+func (s *QuizService) GetQuizAttempt(ctx context.Context, attemptID string, userID string, isAdmin bool) (*QuizAttempt, error) {
 	attUUID, err := uuid.Parse(attemptID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid attempt ID: %w", err)
@@ -606,7 +634,7 @@ func (s *QuizService) GetQuizAttempt(ctx context.Context, attemptID string, user
 		return nil, err
 	}
 
-	if qaUserID != userUUID {
+	if !isAdmin && qaUserID != userUUID {
 		return nil, fmt.Errorf("quiz attempt does not belong to this user")
 	}
 
@@ -614,7 +642,7 @@ func (s *QuizService) GetQuizAttempt(ctx context.Context, attemptID string, user
 		ID:               attUUID,
 		ApplicationID:    appID,
 		JobID:            jobID,
-		UserID:           userUUID,
+		UserID:           qaUserID,
 		Title:            jobTitle,
 		Type:             "General",
 		Status:           status,
@@ -987,47 +1015,68 @@ func (s *QuizService) StartQuizAttempt(ctx context.Context, attemptID, userID, a
 		err = s.pool.QueryRow(ctx, `
 			SELECT user_id, job_id, status FROM job_applications WHERE id = $1
 		`, appUUID).Scan(&appUserID, &appJobID, &appStatus)
-		if err == nil {
-			if appUserID != userUUID {
-				return nil, fmt.Errorf("application does not belong to this user")
-			}
-			if jobUUID != uuid.Nil && appJobID != jobUUID {
-				return nil, fmt.Errorf("application does not match job")
-			}
-			if jobUUID == uuid.Nil {
-				jobUUID = appJobID
-			}
+		if err != nil {
+			return nil, fmt.Errorf("application not found: %w", err)
+		}
+		if appUserID != userUUID {
+			return nil, fmt.Errorf("application does not belong to this user")
+		}
+		if jobUUID != uuid.Nil && appJobID != jobUUID {
+			return nil, fmt.Errorf("application does not match job")
+		}
+		if jobUUID == uuid.Nil {
+			jobUUID = appJobID
 		}
 	}
 
 	// 2. Check if an attempt already exists for this ID or application
 	var (
 		existingID     uuid.UUID
+		existingUserID uuid.UUID
 		existingStatus string
 	)
 	if hasAttemptUUID && appUUID != uuid.Nil {
 		err = s.pool.QueryRow(ctx, `
-			SELECT id, status FROM quiz_attempts WHERE id = $1 OR application_id = $2
-		`, attemptUUID, appUUID).Scan(&existingID, &existingStatus)
+			SELECT id, user_id, status FROM quiz_attempts WHERE id = $1 OR application_id = $2
+		`, attemptUUID, appUUID).Scan(&existingID, &existingUserID, &existingStatus)
 	} else if hasAttemptUUID {
 		err = s.pool.QueryRow(ctx, `
-			SELECT id, status FROM quiz_attempts WHERE id = $1
-		`, attemptUUID).Scan(&existingID, &existingStatus)
+			SELECT id, user_id, status FROM quiz_attempts WHERE id = $1
+		`, attemptUUID).Scan(&existingID, &existingUserID, &existingStatus)
 	} else if appUUID != uuid.Nil {
 		err = s.pool.QueryRow(ctx, `
-			SELECT id, status FROM quiz_attempts WHERE application_id = $1
-		`, appUUID).Scan(&existingID, &existingStatus)
+			SELECT id, user_id, status FROM quiz_attempts WHERE application_id = $1
+		`, appUUID).Scan(&existingID, &existingUserID, &existingStatus)
 	} else {
 		return nil, fmt.Errorf("either valid quiz attempt ID or application ID is required")
 	}
 
 	if err == nil {
+		if existingUserID != userUUID {
+			return nil, fmt.Errorf("quiz attempt does not belong to this user")
+		}
+
 		// Attempt already exists
 		if existingStatus == "completed" {
 			return nil, fmt.Errorf("quiz attempt for this application is already completed")
 		}
 		if existingStatus == "timed_out" || existingStatus == "abandoned" {
 			return nil, fmt.Errorf("quiz attempt is closed (status: %s)", existingStatus)
+		}
+
+		// Check if existing attempt has exceeded time limit
+		var (
+			existingStartedAt pgtype.Timestamp
+			existingTimeLimit int
+		)
+		_ = s.pool.QueryRow(ctx, `
+			SELECT started_at, COALESCE(time_limit_minutes, 0) FROM quiz_attempts WHERE id = $1
+		`, existingID).Scan(&existingStartedAt, &existingTimeLimit)
+		if existingTimeLimit > 0 && existingStartedAt.Valid && time.Since(existingStartedAt.Time) > time.Duration(existingTimeLimit)*time.Minute {
+			_, _ = s.pool.Exec(ctx, `
+				UPDATE quiz_attempts SET status = 'timed_out', completed_at = NOW(), updated_at = NOW() WHERE id = $1
+			`, existingID)
+			return nil, fmt.Errorf("quiz attempt is closed (status: timed_out)")
 		}
 
 		// Ensure status is transitioned to in_progress
@@ -1129,9 +1178,9 @@ func (s *QuizService) StartQuizAttempt(ctx context.Context, attemptID, userID, a
 	_, err = tx.Exec(ctx, `
 		INSERT INTO quiz_attempts (
 			id, application_id, user_id, job_id, total_questions,
-			questions_per_quiz, passing_score, status,
+			questions_per_quiz, time_limit_minutes, passing_score, status,
 			started_at, last_activity_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, 10, 10, 70, 'in_progress', NOW(), NOW(), NOW(), NOW())
+		) VALUES ($1, $2, $3, $4, 10, 10, 30, 70, 'in_progress', NOW(), NOW(), NOW(), NOW())
 	`, attemptUUID, appUUID, userUUID, jobUUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create quiz attempt: %w", err)
@@ -1300,7 +1349,31 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		return nil, fmt.Errorf("failed to count answered questions: %w", err)
 	}
 
-	// 3. Check status
+	// 3. Check status & overall timeout
+	if timeLimitMinutes > 0 && startedAt.Valid {
+		totalSec := timeLimitMinutes * 60
+		elapsed := int(time.Since(startedAt.Time).Seconds())
+		if elapsed >= totalSec {
+			_, _ = s.pool.Exec(ctx, `
+				UPDATE quiz_attempts
+				SET status = 'timed_out', completed_at = NOW(), updated_at = NOW()
+				WHERE id = $1 AND status IN ('started', 'in_progress', 'paused')
+			`, attemptUUID)
+			return map[string]interface{}{
+				"status":              "finished",
+				"message":             "Quiz time limit has expired (timed_out)",
+				"attempt_id":          attemptID,
+				"question_number":     limitCount,
+				"total_questions":     limitCount,
+				"answered":            answeredCount,
+				"skipped":             skippedCount,
+				"remaining_seconds":   0,
+				"remaining_questions": 0,
+				"is_last_question":    true,
+			}, nil
+		}
+	}
+
 	if status == "completed" {
 		return map[string]interface{}{
 			"status":              "finished",
@@ -1553,6 +1626,8 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	if codingDetails != nil {
 		resp["coding_details"] = codingDetails
 	}
+	// Update last_activity_at to record the exact time the question was dispatched to user
+	_, _ = s.pool.Exec(ctx, `UPDATE quiz_attempts SET last_activity_at = NOW() WHERE id = $1`, attemptUUID)
 
 	return resp, nil
 }
@@ -1575,14 +1650,24 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 		return fmt.Errorf("invalid question ID: %w", err)
 	}
 
-	// 2. Validate attempt existence and user ownership
+	// 2. Validate attempt existence, user ownership, and state inside a transaction
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	var (
-		qaUserID uuid.UUID
-		status   string
+		qaUserID         uuid.UUID
+		status           string
+		startedAt        pgtype.Timestamp
+		timeLimitMinutes int
+		lastActivityAt   pgtype.Timestamp
 	)
-	err = s.pool.QueryRow(ctx, `
-		SELECT user_id, status FROM quiz_attempts WHERE id = $1
-	`, attemptUUID).Scan(&qaUserID, &status)
+	err = tx.QueryRow(ctx, `
+		SELECT user_id, status, started_at, COALESCE(time_limit_minutes, 0), last_activity_at
+		FROM quiz_attempts WHERE id = $1 FOR UPDATE
+	`, attemptUUID).Scan(&qaUserID, &status, &startedAt, &timeLimitMinutes, &lastActivityAt)
 	if err != nil {
 		return fmt.Errorf("quiz attempt not found: %w", err)
 	}
@@ -1592,13 +1677,31 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 	if status == "completed" {
 		return fmt.Errorf("cannot answer questions for completed quiz attempt")
 	}
+	if status == "timed_out" || status == "abandoned" {
+		return fmt.Errorf("quiz attempt is no longer active (status: %s)", status)
+	}
 	if status != "started" && status != "in_progress" && status != "paused" {
 		return fmt.Errorf("quiz attempt is no longer active (status: %s)", status)
 	}
 
+	// Check overall quiz time limit
+	if timeLimitMinutes > 0 && startedAt.Valid {
+		totalSec := timeLimitMinutes * 60
+		elapsed := int(time.Since(startedAt.Time).Seconds())
+		if elapsed > totalSec+15 { // 15s grace for network/clock skew
+			_, _ = tx.Exec(ctx, `
+				UPDATE quiz_attempts
+				SET status = 'timed_out', completed_at = NOW(), updated_at = NOW()
+				WHERE id = $1
+			`, attemptUUID)
+			_ = tx.Commit(ctx)
+			return fmt.Errorf("quiz attempt has timed out")
+		}
+	}
+
 	// 3. Verify question belongs to that attempt through quiz_attempt_questions
 	var submittedOrder int
-	err = s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT question_order FROM quiz_attempt_questions
 		WHERE quiz_attempt_id = $1 AND question_id = $2
 	`, attemptUUID, questionUUID).Scan(&submittedOrder)
@@ -1606,29 +1709,40 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 		return fmt.Errorf("question does not belong to this quiz attempt")
 	}
 
-	// 4. Verify question is the current expected question (prevent skipping ahead)
-	var expectedOrder int
-	err = s.pool.QueryRow(ctx, `
-		SELECT COALESCE(MIN(qaq.question_order), 0)::int
-		FROM quiz_attempt_questions qaq
-		WHERE qaq.quiz_attempt_id = $1
-		  AND NOT EXISTS (
-		      SELECT 1 FROM quiz_answers qa
-		      WHERE qa.quiz_attempt_id = qaq.quiz_attempt_id
-		        AND qa.question_id = qaq.question_id
-		  )
-	`, attemptUUID).Scan(&expectedOrder)
+	// 4. Verify question sequence (allows updating already answered questions; prevents skipping ahead)
+	var alreadyAnswered bool
+	err = tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM quiz_answers WHERE quiz_attempt_id = $1 AND question_id = $2
+		)
+	`, attemptUUID, questionUUID).Scan(&alreadyAnswered)
 	if err != nil {
-		return fmt.Errorf("failed to determine expected question order: %w", err)
+		return fmt.Errorf("failed to check existing answer: %w", err)
 	}
 
-	if expectedOrder == 0 {
-		return fmt.Errorf("all questions for this quiz attempt have already been answered")
-	}
+	if !alreadyAnswered {
+		var expectedOrder int
+		err = tx.QueryRow(ctx, `
+			SELECT COALESCE(MIN(qaq.question_order), 0)::int
+			FROM quiz_attempt_questions qaq
+			WHERE qaq.quiz_attempt_id = $1
+			  AND NOT EXISTS (
+			      SELECT 1 FROM quiz_answers qa
+			      WHERE qa.quiz_attempt_id = qaq.quiz_attempt_id
+			        AND qa.question_id = qaq.question_id
+			  )
+		`, attemptUUID).Scan(&expectedOrder)
+		if err != nil {
+			return fmt.Errorf("failed to determine expected question order: %w", err)
+		}
 
-	// If expectedOrder > 0 and submittedOrder > expectedOrder, the user skipped ahead
-	if expectedOrder > 0 && submittedOrder > expectedOrder {
-		return fmt.Errorf("cannot answer questions out of order: expected question %d, got %d", expectedOrder, submittedOrder)
+		if expectedOrder == 0 {
+			return fmt.Errorf("all questions for this quiz attempt have already been answered")
+		}
+
+		if submittedOrder > expectedOrder {
+			return fmt.Errorf("cannot answer questions out of order: expected question %d, got %d", expectedOrder, submittedOrder)
+		}
 	}
 
 	// 5. Fetch question info from questions table
@@ -1637,7 +1751,7 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 		timeLimitSeconds int
 		questionType     string
 	)
-	err = s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT correct_answer, time_limit_seconds, question_type::text
 		FROM questions WHERE id = $1
 	`, questionUUID).Scan(&dbCorrectAnswer, &timeLimitSeconds, &questionType)
@@ -1645,19 +1759,28 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 		return fmt.Errorf("failed to fetch question details: %w", err)
 	}
 
-	// 6. Enforce time limit
-	if timeLimitSeconds > 0 && timeSpent > timeLimitSeconds {
-		return fmt.Errorf("time limit exceeded for this question (%d seconds)", timeLimitSeconds)
+	// 6. Enforce time limit with server-authoritative verification
+	if timeLimitSeconds > 0 {
+		if timeSpent > timeLimitSeconds {
+			return fmt.Errorf("time limit exceeded for this question (%d seconds)", timeLimitSeconds)
+		}
+		if !alreadyAnswered && lastActivityAt.Valid {
+			serverElapsed := int(time.Since(lastActivityAt.Time).Seconds())
+			if serverElapsed > timeLimitSeconds+15 {
+				return fmt.Errorf("time limit exceeded for this question (%d seconds)", timeLimitSeconds)
+			}
+		}
+	}
+	if timeSpent < 0 {
+		timeSpent = 0
 	}
 
 	// 7. Determine correctness
 	isCodingQuestion := questionType == "coding_challenge"
 	isCorrect := false
 	if isCodingQuestion {
-		// For coding questions, preserve the existing is_correct value
-		// (set by RunQuizCode based on test execution results).
 		var existingCorrect *bool
-		_ = s.pool.QueryRow(ctx,
+		_ = tx.QueryRow(ctx,
 			"SELECT is_correct FROM quiz_answers WHERE quiz_attempt_id = $1 AND question_id = $2",
 			attemptUUID, questionUUID).Scan(&existingCorrect)
 		if existingCorrect != nil {
@@ -1669,6 +1792,7 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 
 	// 8. Insert or update quiz_answers
 	newAnswerID := uuid.New()
+	var savedAnswerID uuid.UUID
 	query := `
 		INSERT INTO quiz_answers (
 			id, quiz_attempt_id, question_id, user_answer, time_spent_seconds, is_skipped, is_correct, created_at
@@ -1682,21 +1806,30 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 			save_count = quiz_answers.save_count + 1,
 			last_saved_at = NOW(),
 			updated_at = NOW()
+		RETURNING id
 	`
-	_, err = s.pool.Exec(ctx, query, newAnswerID, attemptUUID, questionUUID, answer, timeSpent, isSkipped, isCorrect)
+	err = tx.QueryRow(ctx, query, newAnswerID, attemptUUID, questionUUID, answer, timeSpent, isSkipped, isCorrect).Scan(&savedAnswerID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to save quiz answer: %w", err)
 	}
 
-	// 9. Update last_activity_at and transition status to in_progress if started
-	_, _ = s.pool.Exec(ctx, `
+	// 9. quiz_answer_history writes stopped to prevent O(attempts * questions * saves) bloat.
+	// Historical data retained; writes can be re-enabled if dedicated audit requirements exist.
+	_ = savedAnswerID
+
+	// 10. Update last_activity_at and transition status to in_progress if started
+	_, err = tx.Exec(ctx, `
 		UPDATE quiz_attempts
 		SET last_activity_at = NOW(),
+		    time_spent_seconds = time_spent_seconds + $2,
 		    status = CASE WHEN status = 'started' THEN 'in_progress'::quiz_attempt_status ELSE status END
 		WHERE id = $1
-	`, attemptUUID)
+	`, attemptUUID, timeSpent)
+	if err != nil {
+		return fmt.Errorf("failed to update quiz attempt: %w", err)
+	}
 
-	return nil
+	return tx.Commit(ctx)
 }
 
 // RunQuizCode executes user code against visible test cases for a coding_challenge question
@@ -1714,14 +1847,16 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 		return nil, fmt.Errorf("invalid question ID: %w", err)
 	}
 
-	// Verify attempt ownership and active status
+	// Verify attempt ownership, active status, and time limit
 	var (
-		qaUserID uuid.UUID
-		status   string
+		qaUserID         uuid.UUID
+		status           string
+		startedAt        pgtype.Timestamp
+		timeLimitMinutes int
 	)
 	err = s.pool.QueryRow(ctx, `
-		SELECT user_id, status FROM quiz_attempts WHERE id = $1
-	`, attemptUUID).Scan(&qaUserID, &status)
+		SELECT user_id, status, started_at, COALESCE(time_limit_minutes, 0) FROM quiz_attempts WHERE id = $1
+	`, attemptUUID).Scan(&qaUserID, &status, &startedAt, &timeLimitMinutes)
 	if err != nil {
 		return nil, fmt.Errorf("quiz attempt not found: %w", err)
 	}
@@ -1731,18 +1866,59 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 	if status == "completed" {
 		return nil, fmt.Errorf("cannot run code for completed quiz attempt")
 	}
+	if status == "timed_out" || status == "abandoned" {
+		return nil, fmt.Errorf("quiz attempt is no longer active (status: %s)", status)
+	}
 	if status != "started" && status != "in_progress" && status != "paused" {
 		return nil, fmt.Errorf("quiz attempt is no longer active (status: %s)", status)
 	}
 
+	// Check overall quiz time limit
+	if timeLimitMinutes > 0 && startedAt.Valid {
+		totalSec := timeLimitMinutes * 60
+		elapsed := int(time.Since(startedAt.Time).Seconds())
+		if elapsed > totalSec+15 {
+			_, _ = s.pool.Exec(ctx, `
+				UPDATE quiz_attempts
+				SET status = 'timed_out', completed_at = NOW(), updated_at = NOW()
+				WHERE id = $1 AND status IN ('started', 'in_progress', 'paused')
+			`, attemptUUID)
+			return nil, fmt.Errorf("quiz attempt has timed out")
+		}
+	}
+
 	// Verify question belongs to that attempt through quiz_attempt_questions
-	var dummyOrder int
+	var submittedOrder int
 	err = s.pool.QueryRow(ctx, `
 		SELECT question_order FROM quiz_attempt_questions
 		WHERE quiz_attempt_id = $1 AND question_id = $2
-	`, attemptUUID, questionUUID).Scan(&dummyOrder)
+	`, attemptUUID, questionUUID).Scan(&submittedOrder)
 	if err != nil {
 		return nil, fmt.Errorf("question does not belong to this quiz attempt")
+	}
+
+	// Prevent running code for future questions out of sequence
+	var alreadyAnswered bool
+	_ = s.pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM quiz_answers WHERE quiz_attempt_id = $1 AND question_id = $2)
+	`, attemptUUID, questionUUID).Scan(&alreadyAnswered)
+
+	if !alreadyAnswered {
+		var expectedOrder int
+		_ = s.pool.QueryRow(ctx, `
+			SELECT COALESCE(MIN(qaq.question_order), 0)::int
+			FROM quiz_attempt_questions qaq
+			WHERE qaq.quiz_attempt_id = $1
+			  AND NOT EXISTS (
+			      SELECT 1 FROM quiz_answers qa
+			      WHERE qa.quiz_attempt_id = qaq.quiz_attempt_id
+			        AND qa.question_id = qaq.question_id
+			  )
+		`, attemptUUID).Scan(&expectedOrder)
+
+		if expectedOrder > 0 && submittedOrder > expectedOrder {
+			return nil, fmt.Errorf("cannot run code for question out of order: expected question %d, got %d", expectedOrder, submittedOrder)
+		}
 	}
 
 	// First verify the question exists and is a coding_challenge
@@ -1916,7 +2092,7 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 		}
 
 		isCorrect := resp.Passed != nil && *resp.Passed
-		var codeOutput *string = nil
+		codeOutput := capCodeOutput(resp.Stdout)
 		_, upsertErr := s.pool.Exec(ctx, `
 			INSERT INTO quiz_answers (quiz_attempt_id, question_id, user_answer, is_correct, code_output, execution_time_ms, save_count, last_saved_at)
 			VALUES ($1, $2, $3, $4, $5, $6, 1, NOW())
@@ -1957,7 +2133,7 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 
 	// Save result to quiz_answers
 	isCorrect := resp.Passed != nil && *resp.Passed
-	var codeOutput *string = nil
+	codeOutput := capCodeOutput(resp.Stdout)
 	_, upsertErr := s.pool.Exec(ctx, `
 		INSERT INTO quiz_answers (quiz_attempt_id, question_id, user_answer, is_correct, code_output, execution_time_ms, save_count, last_saved_at)
 		VALUES ($1, $2, $3, $4, $5, $6, 1, NOW())
@@ -1977,6 +2153,20 @@ func (s *QuizService) RunQuizCode(ctx context.Context, attemptID, userID, questi
 	return resp, nil
 }
 
+const maxCodeOutputBytes = 16 * 1024 // 16 KB hard limit for stored sandbox output
+
+// capCodeOutput truncates stdout to maxCodeOutputBytes to prevent database bloat
+func capCodeOutput(s string) *string {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return nil
+	}
+	if len(trimmed) > maxCodeOutputBytes {
+		trimmed = trimmed[:maxCodeOutputBytes] + "\n...[output truncated: exceeded 16KB limit]"
+	}
+	return &trimmed
+}
+
 // SubmitQuizAttempt calculates and locks progress finality status safely
 func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, userID string, tags []string) error {
 	attemptUUID, err := uuid.Parse(attemptID)
@@ -1988,18 +2178,27 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 		return fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	// Check attempt existence, ownership, and current status
+	// Start transaction and acquire row lock on quiz_attempt
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Check attempt existence, ownership, timeout, and current status with FOR UPDATE
 	var (
 		appID            uuid.UUID
 		qaUserID         uuid.UUID
 		status           string
 		passingScore     int
 		questionsPerQuiz int
+		startedAt        pgtype.Timestamp
+		timeLimitMinutes int
 	)
-	err = s.pool.QueryRow(ctx, `
-		SELECT application_id, user_id, status, passing_score, questions_per_quiz
-		FROM quiz_attempts WHERE id = $1
-	`, attemptUUID).Scan(&appID, &qaUserID, &status, &passingScore, &questionsPerQuiz)
+	err = tx.QueryRow(ctx, `
+		SELECT application_id, user_id, status, passing_score, questions_per_quiz, started_at, COALESCE(time_limit_minutes, 0)
+		FROM quiz_attempts WHERE id = $1 FOR UPDATE
+	`, attemptUUID).Scan(&appID, &qaUserID, &status, &passingScore, &questionsPerQuiz, &startedAt, &timeLimitMinutes)
 	if err != nil {
 		return fmt.Errorf("could not find quiz attempt: %w", err)
 	}
@@ -2012,13 +2211,24 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 	if status == "timed_out" || status == "abandoned" {
 		return fmt.Errorf("quiz attempt is %s and cannot be submitted", status)
 	}
-
-	// Start a database transaction
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
+	if status != "started" && status != "in_progress" && status != "paused" {
+		return fmt.Errorf("quiz attempt is no longer active (status: %s)", status)
 	}
-	defer tx.Rollback(ctx)
+
+	// Check overall quiz time limit
+	if timeLimitMinutes > 0 && startedAt.Valid {
+		totalSec := timeLimitMinutes * 60
+		elapsed := int(time.Since(startedAt.Time).Seconds())
+		if elapsed > totalSec+15 {
+			_, _ = tx.Exec(ctx, `
+				UPDATE quiz_attempts
+				SET status = 'timed_out', completed_at = NOW(), updated_at = NOW()
+				WHERE id = $1
+			`, attemptUUID)
+			_ = tx.Commit(ctx)
+			return fmt.Errorf("quiz attempt has timed out and cannot be submitted")
+		}
+	}
 
 	// Calculate score from persisted answers in quiz_answers for attempt questions
 	var (
@@ -2064,8 +2274,8 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 
 	passed := int(score) >= passingScore
 
-	// Update Quiz status to completed
-	_, err = tx.Exec(ctx, `
+	// Update Quiz status to completed atomically
+	res, err := tx.Exec(ctx, `
 		UPDATE quiz_attempts
 		SET status = 'completed',
 		    score = $2,
@@ -2075,10 +2285,13 @@ func (s *QuizService) SubmitQuizAttempt(ctx context.Context, attemptID string, u
 		    passed = $6,
 		    completed_at = NOW(),
 		    updated_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND status IN ('started', 'in_progress', 'paused')
 	`, attemptUUID, int(score), correctCount, incorrectCount, skippedCount, passed)
 	if err != nil {
 		return err
+	}
+	if res.RowsAffected() == 0 {
+		return fmt.Errorf("quiz attempt was already completed or not in submittable state")
 	}
 
 	// Update the job_applications table

@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/Izone-hub/talent-backend/service"
 	"github.com/google/uuid"
@@ -77,7 +78,15 @@ func (c *QuizAnswerFeedbackController) Upsert(w http.ResponseWriter, r *http.Req
 	}
 	feedback, err := c.feedbackService.Upsert(r.Context(), claims.UserID, quizAttemptID, questionID, applicationID, req.Feedback)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save feedback")
+		if strings.Contains(err.Error(), "does not belong") || strings.Contains(err.Error(), "does not match") {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Failed to save feedback: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, feedback)
@@ -117,10 +126,13 @@ func (c *QuizAnswerFeedbackController) GetByApplication(w http.ResponseWriter, r
 		writeError(w, http.StatusBadRequest, "Invalid application ID")
 		return
 	}
-	// Admins can view any application's feedback; users can only view their own
-	_ = claims
-	feedbacks, err := c.feedbackService.GetByApplication(r.Context(), applicationID)
+	isAdmin := claims.Role == "admin"
+	feedbacks, err := c.feedbackService.GetByApplication(r.Context(), applicationID, claims.UserID, isAdmin)
 	if err != nil {
+		if strings.Contains(err.Error(), "does not belong") {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusOK, []interface{}{})
 		return
 	}

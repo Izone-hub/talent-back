@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Izone-hub/talent-backend/service"
@@ -48,8 +49,13 @@ func (c *QuizController) GetQuiz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	quiz, err := c.quizService.GetQuizAttempt(r.Context(), id, claims.UserID.String())
+	isAdmin := claims.Role == "admin"
+	quiz, err := c.quizService.GetQuizAttempt(r.Context(), id, claims.UserID.String(), isAdmin)
 	if err != nil {
+		if strings.Contains(err.Error(), "does not belong") {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		writeError(w, http.StatusNotFound, "Quiz not found: "+err.Error())
 		return
 	}
@@ -238,7 +244,7 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 
-	quiz, err := c.quizService.GetQuizAttempt(r.Context(), id, claims.UserID.String())
+	quiz, err := c.quizService.GetQuizAttempt(r.Context(), id, claims.UserID.String(), false)
 	if err != nil {
 		switch {
 		case strings.Contains(err.Error(), "does not belong"):
@@ -267,7 +273,9 @@ func (c *QuizController) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(err.Error(), "does not belong"):
 			writeError(w, http.StatusForbidden, err.Error())
-		case strings.Contains(err.Error(), "already completed"), strings.Contains(err.Error(), "cannot be submitted"):
+		case strings.Contains(err.Error(), "already completed"),
+			strings.Contains(err.Error(), "cannot be submitted"),
+			strings.Contains(err.Error(), "timed out"):
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
 			writeError(w, http.StatusInternalServerError, "Failed to submit quiz: "+err.Error())
@@ -433,7 +441,20 @@ func (c *QuizController) ListJobQuizzes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	quizzes, err := c.quizService.GetJobQuizAttempts(r.Context(), id)
+	limit := int32(20)
+	offset := int32(0)
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = int32(parsed)
+		}
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = int32(parsed)
+		}
+	}
+
+	quizzes, err := c.quizService.GetJobQuizAttempts(r.Context(), id, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to list quizzes: "+err.Error())
 		return
@@ -451,7 +472,20 @@ func (c *QuizController) ListUserQuizzes(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	quizzes, err := c.quizService.GetUserQuizAttempts(r.Context(), id)
+	limit := int32(20)
+	offset := int32(0)
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = int32(parsed)
+		}
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = int32(parsed)
+		}
+	}
+
+	quizzes, err := c.quizService.GetUserQuizAttempts(r.Context(), id, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to list quizzes: "+err.Error())
 		return

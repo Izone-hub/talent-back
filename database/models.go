@@ -594,6 +594,23 @@ type ContactRequest struct {
 	CreatedAt      pgtype.Timestamp
 }
 
+type CvAnalysisJob struct {
+	ID             pgtype.UUID
+	UserID         pgtype.UUID
+	CvVersion      int32
+	FilePath       string
+	FileName       string
+	GithubUsername string
+	Status         string
+	Attempts       int32
+	MaxAttempts    int32
+	LastError      pgtype.Text
+	StartedAt      pgtype.Timestamp
+	CompletedAt    pgtype.Timestamp
+	CreatedAt      pgtype.Timestamp
+	UpdatedAt      pgtype.Timestamp
+}
+
 type CvApplicationUsage struct {
 	CvID          pgtype.UUID
 	ApplicationID pgtype.UUID
@@ -637,6 +654,7 @@ type GithubSnapshot struct {
 	Following   pgtype.Int4
 	RawData     []byte
 	FetchedAt   pgtype.Timestamp
+	UpdatedAt   pgtype.Timestamp
 }
 
 type Job struct {
@@ -869,38 +887,11 @@ type RepositoryAnalysis struct {
 	AnalyzedAt pgtype.Timestamp
 }
 
-type SandboxTemplate struct {
-	ID           pgtype.UUID
-	Language     string
-	Name         string
-	Description  pgtype.Text
-	TemplatePath string
-	IsActive     pgtype.Bool
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-}
-
 type SavedJob struct {
 	UserID  pgtype.UUID
 	JobID   pgtype.UUID
 	SavedAt pgtype.Timestamp
 	Notes   pgtype.Text
-}
-
-type Submission struct {
-	ID            pgtype.UUID
-	UserID        uuid.UUID
-	QuestionID    uuid.UUID
-	Language      string
-	Code          string
-	ExecutionType string
-	Passed        pgtype.Bool
-	Stdout        pgtype.Text
-	Stderr        pgtype.Text
-	ExitCode      pgtype.Int4
-	TimeMs        pgtype.Int4
-	ErrorMessage  pgtype.Text
-	SubmittedAt   pgtype.Timestamptz
 }
 
 type Tag struct {
@@ -926,17 +917,10 @@ type User struct {
 	CreatedAt            pgtype.Timestamp
 	UpdatedAt            pgtype.Timestamp
 	PublicRepos          pgtype.Int4
-	PublicGists          pgtype.Int4
 	Followers            pgtype.Int4
 	Following            pgtype.Int4
-	Hireable             pgtype.Bool
-	Blog                 pgtype.Text
-	Company              pgtype.Text
-	Location             pgtype.Text
 	Bio                  pgtype.Text
-	TwitterUsername      pgtype.Text
 	TopLanguages         []string
-	ContributionCount    pgtype.Int4
 	AcceptanceJobID      uuid.UUID
 	Categories           []string
 }

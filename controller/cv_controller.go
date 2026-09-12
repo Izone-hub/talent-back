@@ -1,15 +1,8 @@
 package controller
 
 import (
-	"bytes"
-	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strconv"
-	"time"
 
 	"github.com/Izone-hub/talent-backend/models"
 	"github.com/Izone-hub/talent-backend/service"
@@ -102,54 +95,18 @@ func (c *CvController) UploadCV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enqueue CV analysis job in PostgreSQL queue
+	claims, _ := r.Context().Value("user").(*service.Claims)
+	githubUsername := ""
+	if claims != nil {
+		githubUsername = claims.GithubUsername
+	}
+	if err := c.cvService.EnqueueAnalysisJob(r.Context(), userID, cv.Version, cv.FilePath, cv.FileName, githubUsername); err != nil {
+		// Log error but do not fail the upload itself
+		println("Warning: failed to enqueue CV analysis job:", err.Error())
+	}
+
 	writeJSON(w, http.StatusCreated, cv.ToResponse())
-}
-
-func triggerCVAnalysis(filePath, fileName, githubUsername string, cvVersion int) {
-	fileBytes, err := os.ReadFile(filePath)
-	if err != nil {
-		return
-	}
-
-	var buf bytes.Buffer
-	mp := multipart.NewWriter(&buf)
-
-	fw, err := mp.CreateFormFile("file", fileName)
-	if err != nil {
-		return
-	}
-	if _, err := fw.Write(fileBytes); err != nil {
-		return
-	}
-	if githubUsername != "" {
-		mp.WriteField("github_username", githubUsername)
-	}
-	if cvVersion > 0 {
-		mp.WriteField("cv_version", strconv.Itoa(cvVersion))
-	}
-	mp.Close()
-
-	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Post("http://localhost:5000/api/v1/analyze-cv", mp.FormDataContentType(), &buf)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return
-	}
-
-	historyDir := "history"
-	os.MkdirAll(historyDir, 0755)
-	stem := filepath.Base(fileName)
-	if ext := filepath.Ext(stem); ext != "" {
-		stem = stem[:len(stem)-len(ext)]
-	}
-	ts := time.Now().Unix()
-	historyPath := filepath.Join(historyDir, fmt.Sprintf("upload_%s_%d.json", stem, ts))
-	os.WriteFile(historyPath, body, 0644)
 }
 
 // ---------------------------------------------------------------------------

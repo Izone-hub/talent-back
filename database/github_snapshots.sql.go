@@ -18,10 +18,19 @@ INSERT INTO github_snapshots (
     public_repos,
     followers,
     following,
-    raw_data
+    raw_data,
+    fetched_at,
+    updated_at
 )
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, public_repos, followers, following, raw_data, fetched_at
+VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+ON CONFLICT (user_id) DO UPDATE SET
+    public_repos = EXCLUDED.public_repos,
+    followers = EXCLUDED.followers,
+    following = EXCLUDED.following,
+    raw_data = EXCLUDED.raw_data,
+    fetched_at = NOW(),
+    updated_at = NOW()
+RETURNING id, user_id, public_repos, followers, following, raw_data, fetched_at, updated_at
 `
 
 type CreateGitHubSnapshotParams struct {
@@ -49,14 +58,14 @@ func (q *Queries) CreateGitHubSnapshot(ctx context.Context, arg CreateGitHubSnap
 		&i.Following,
 		&i.RawData,
 		&i.FetchedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getLatestGitHubSnapshot = `-- name: GetLatestGitHubSnapshot :one
-SELECT id, user_id, public_repos, followers, following, raw_data, fetched_at FROM github_snapshots
+SELECT id, user_id, public_repos, followers, following, raw_data, fetched_at, updated_at FROM github_snapshots
 WHERE user_id = $1
-ORDER BY fetched_at DESC
 LIMIT 1
 `
 
@@ -71,14 +80,15 @@ func (q *Queries) GetLatestGitHubSnapshot(ctx context.Context, userID uuid.UUID)
 		&i.Following,
 		&i.RawData,
 		&i.FetchedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const listGitHubSnapshots = `-- name: ListGitHubSnapshots :many
-SELECT id, user_id, public_repos, followers, following, raw_data, fetched_at FROM github_snapshots
+SELECT id, user_id, public_repos, followers, following, raw_data, fetched_at, updated_at FROM github_snapshots
 WHERE user_id = $1
-ORDER BY fetched_at DESC
+LIMIT 1
 `
 
 func (q *Queries) ListGitHubSnapshots(ctx context.Context, userID uuid.UUID) ([]GithubSnapshot, error) {
@@ -98,6 +108,7 @@ func (q *Queries) ListGitHubSnapshots(ctx context.Context, userID uuid.UUID) ([]
 			&i.Following,
 			&i.RawData,
 			&i.FetchedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

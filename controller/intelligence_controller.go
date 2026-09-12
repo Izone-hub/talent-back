@@ -117,15 +117,27 @@ type IntelligenceReport struct {
 // --- Handler ---
 
 func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	idStr := r.PathValue("id")
 	if idStr == "" {
-		http.Error(w, "Missing user ID", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Missing user ID")
 		return
 	}
 
 	targetUserID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+
+	// Only the user themselves or an admin can fetch the GitHub intelligence snapshot
+	if claims.Role != "admin" && claims.UserID != targetUserID {
+		writeError(w, http.StatusForbidden, "Access denied: you can only fetch your own GitHub intelligence")
 		return
 	}
 
@@ -133,34 +145,50 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 	copy(pgID.Bytes[:], targetUserID[:])
 	pgID.Valid = true
 
-	// 1. Fetch user to get GithubAccessToken
-	dbUser, err := c.queries.GetUserByID(r.Context(), pgID)
-	if err != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
-		return
+	// 1. Check for existing cached snapshot (one current snapshot per user, 24h freshness)
+	var githubUser *service.GitHubUser
+	var repos []service.GitHubRepo
+
+	snapshot, err := c.queries.GetLatestGitHubSnapshot(r.Context(), targetUserID)
+	if err == nil && snapshot.UpdatedAt.Valid && time.Since(snapshot.UpdatedAt.Time) < 24*time.Hour && len(snapshot.RawData) > 0 {
+		var cached struct {
+			User  *service.GitHubUser  `json:"user"`
+			Repos []service.GitHubRepo `json:"repos"`
+		}
+		if unmarshalErr := json.Unmarshal(snapshot.RawData, &cached); unmarshalErr == nil && cached.User != nil {
+			githubUser = cached.User
+			repos = cached.Repos
+		}
 	}
 
-	// 2. Call GitHub API
-	githubUser, repos, err := c.githubService.GetUserWithDetails(r.Context(), dbUser.GithubAccessToken.String)
-	if err != nil {
-		http.Error(w, "Failed to fetch from GitHub: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// 2. Fetch from GitHub API and upsert single user snapshot if cache missed or expired
+	if githubUser == nil {
+		dbUser, err := c.queries.GetUserByID(r.Context(), pgID)
+		if err != nil {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
 
-	// 3. Serialize raw data and save snapshot
-	rawData := map[string]interface{}{"user": githubUser, "repos": repos}
-	rawBytes, _ := json.Marshal(rawData)
+		githubUser, repos, err = c.githubService.GetUserWithDetails(r.Context(), dbUser.GithubAccessToken.String)
+		if err != nil {
+			http.Error(w, "Failed to fetch from GitHub: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-	_, err = c.queries.CreateGitHubSnapshot(r.Context(), database.CreateGitHubSnapshotParams{
-		UserID:      targetUserID,
-		PublicRepos: pgtype.Int4{Int32: int32(githubUser.PublicRepos), Valid: true},
-		Followers:   pgtype.Int4{Int32: int32(githubUser.Followers), Valid: true},
-		Following:   pgtype.Int4{Int32: int32(githubUser.Following), Valid: true},
-		RawData:     rawBytes,
-	})
-	if err != nil {
-		http.Error(w, "Failed to save snapshot: "+err.Error(), http.StatusInternalServerError)
-		return
+		rawData := map[string]interface{}{"user": githubUser, "repos": repos}
+		rawBytes, _ := json.Marshal(rawData)
+
+		_, err = c.queries.CreateGitHubSnapshot(r.Context(), database.CreateGitHubSnapshotParams{
+			UserID:      targetUserID,
+			PublicRepos: pgtype.Int4{Int32: int32(githubUser.PublicRepos), Valid: true},
+			Followers:   pgtype.Int4{Int32: int32(githubUser.Followers), Valid: true},
+			Following:   pgtype.Int4{Int32: int32(githubUser.Following), Valid: true},
+			RawData:     rawBytes,
+		})
+		if err != nil {
+			http.Error(w, "Failed to save snapshot: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// 4. Compute GitHub Intelligence signals
@@ -235,6 +263,12 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 }
 
 func (c *IntelligenceController) GetLatestUserSummary(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok || claims.Role != "admin" {
+		writeError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+
 	idStr := r.PathValue("id")
 	if idStr == "" {
 		writeError(w, http.StatusBadRequest, "Missing user ID")

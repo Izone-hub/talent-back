@@ -20,20 +20,13 @@ type User struct {
 	CreatedAt            time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at" db:"updated_at"`
 
-	// New developer fields
-	PublicRepos       int        `json:"public_repos" db:"public_repos"`
-	PublicGists       int        `json:"public_gists" db:"public_gists"`
-	Followers         int        `json:"followers" db:"followers"`
-	Following         int        `json:"following" db:"following"`
-	Hireable          bool       `json:"hireable" db:"hireable"`
-	Blog              *string    `json:"blog,omitempty" db:"blog"`
-	Company           *string    `json:"company,omitempty" db:"company"`
-	Location          *string    `json:"location,omitempty" db:"location"`
-	Bio               *string    `json:"bio,omitempty" db:"bio"`
-	TwitterUsername   *string    `json:"twitter_username,omitempty" db:"twitter_username"`
-	TopLanguages      []string   `json:"top_languages" db:"top_languages"`
-	ContributionCount int        `json:"contribution_count" db:"contribution_count"`
-	AcceptanceJobID   *uuid.UUID `json:"acceptance_job_id,omitempty" db:"acceptance_job_id"`
+	// Developer profile fields
+	PublicRepos     int        `json:"public_repos" db:"public_repos"`
+	Followers       int        `json:"followers" db:"followers"`
+	Following       int        `json:"following" db:"following"`
+	Bio             *string    `json:"bio,omitempty" db:"bio"`
+	TopLanguages    []string   `json:"top_languages" db:"top_languages"`
+	AcceptanceJobID *uuid.UUID `json:"acceptance_job_id,omitempty" db:"acceptance_job_id"`
 }
 
 func (u *User) IsAdmin() bool {
@@ -43,28 +36,21 @@ func (u *User) IsAdmin() bool {
 // ToResponse returns a copy of the user safe for API responses
 func (u *User) ToResponse() User {
 	return User{
-		ID:                u.ID,
-		GithubID:          u.GithubID,
-		GithubUsername:    u.GithubUsername,
-		Email:             u.Email,
-		AvatarURL:         u.AvatarURL,
-		Name:              u.Name,
-		Role:              u.Role,
-		LastLoginAt:       u.LastLoginAt,
-		CreatedAt:         u.CreatedAt,
-		UpdatedAt:         u.UpdatedAt,
-		PublicRepos:       u.PublicRepos,
-		PublicGists:       u.PublicGists,
-		Followers:         u.Followers,
-		Following:         u.Following,
-		Hireable:          u.Hireable,
-		Blog:              u.Blog,
-		Company:           u.Company,
-		Location:          u.Location,
-		Bio:               u.Bio,
-		TwitterUsername:   u.TwitterUsername,
-		TopLanguages:      u.TopLanguages,
-		ContributionCount: u.ContributionCount,
-		AcceptanceJobID:   u.AcceptanceJobID,
+		ID:              u.ID,
+		GithubID:        u.GithubID,
+		GithubUsername:  u.GithubUsername,
+		Email:           u.Email,
+		AvatarURL:       u.AvatarURL,
+		Name:            u.Name,
+		Role:            u.Role,
+		LastLoginAt:     u.LastLoginAt,
+		CreatedAt:       u.CreatedAt,
+		UpdatedAt:       u.UpdatedAt,
+		PublicRepos:     u.PublicRepos,
+		Followers:       u.Followers,
+		Following:       u.Following,
+		Bio:             u.Bio,
+		TopLanguages:    u.TopLanguages,
+		AcceptanceJobID: u.AcceptanceJobID,
 	}
 }

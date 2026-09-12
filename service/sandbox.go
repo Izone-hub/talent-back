@@ -17,6 +17,21 @@ import (
 
 type SandboxService struct{}
 
+var (
+	sandboxSem = make(chan struct{}, 8) // Maximum 8 concurrent container executions
+)
+
+func acquireSandboxSlot(ctx context.Context) (func(), error) {
+	select {
+	case sandboxSem <- struct{}{}:
+		return func() { <-sandboxSem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(15 * time.Second):
+		return nil, fmt.Errorf("sandbox execution capacity reached; please retry shortly")
+	}
+}
+
 func NewSandboxService() *SandboxService {
 	return &SandboxService{}
 }
@@ -179,6 +194,12 @@ func (s *SandboxService) ParseCode(ctx context.Context, req models.ParseRequest)
 }
 
 func (s *SandboxService) parsePython(ctx context.Context, code string) (*models.ParseResponse, error) {
+	release, semErr := acquireSandboxSlot(ctx)
+	if semErr != nil {
+		return &models.ParseResponse{Error: semErr.Error()}, nil
+	}
+	defer release()
+
 	parserScript := `import ast
 import json
 import sys
@@ -214,8 +235,9 @@ print(json.dumps({"functions": functions}))
 	dockerArgs := []string{
 		"run", "--rm", "--network", "none",
 		"--memory", "128m", "--cpus", "0.5",
+		"--pids-limit", "64",
 		"--read-only", "--tmpfs", "/tmp:rw,exec,nosuid,size=64m",
-		"-v", workDir+":/code:ro", "-w", "/code",
+		"-v", workDir + ":/code:ro", "-w", "/code",
 		"--security-opt", "no-new-privileges:true",
 		"--cap-drop", "ALL",
 		"python:3.12-slim", "python", "/code/parser.py",
@@ -239,6 +261,12 @@ print(json.dumps({"functions": functions}))
 }
 
 func (s *SandboxService) parseJavaScript(ctx context.Context, code string) (*models.ParseResponse, error) {
+	release, semErr := acquireSandboxSlot(ctx)
+	if semErr != nil {
+		return &models.ParseResponse{Error: semErr.Error()}, nil
+	}
+	defer release()
+
 	parserScript := `const acorn = require('acorn');
 const code = require('fs').readFileSync('/code/input.js', 'utf8');
 
@@ -287,8 +315,9 @@ try {
 	dockerArgs := []string{
 		"run", "--rm", "--network", "none",
 		"--memory", "128m", "--cpus", "0.5",
+		"--pids-limit", "64",
 		"--read-only", "--tmpfs", "/tmp:rw,exec,nosuid,size=64m",
-		"-v", workDir+":/code", "-w", "/code",
+		"-v", workDir + ":/code", "-w", "/code",
 		"--security-opt", "no-new-privileges:true",
 		"--cap-drop", "ALL",
 		"node:22-slim", "sh", "-c", "npm install --silent 2>/dev/null && node /code/parser.js",
@@ -445,6 +474,12 @@ func (s *SandboxService) executeFramework(ctx context.Context, cfg langConfig, r
 }
 
 func (s *SandboxService) runDocker(ctx context.Context, image, workDir string, cmdArgs []string, stdin string, timeLimit, memLimit int, envVars ...string) (*models.ExecuteResponse, error) {
+	release, semErr := acquireSandboxSlot(ctx)
+	if semErr != nil {
+		return &models.ExecuteResponse{Error: semErr.Error()}, nil
+	}
+	defer release()
+
 	dockerArgs := []string{"run", "--rm", "--network", "none"}
 
 	for _, e := range envVars {
@@ -458,13 +493,15 @@ func (s *SandboxService) runDocker(ctx context.Context, image, workDir string, c
 	}
 
 	dockerArgs = append(dockerArgs, "--memory")
-	if memLimit > 0 {
-		dockerArgs = append(dockerArgs, fmt.Sprintf("%dm", memLimit))
-	} else {
-		dockerArgs = append(dockerArgs, "256m")
+	if memLimit < 32 {
+		memLimit = 256
+	} else if memLimit > 512 {
+		memLimit = 512
 	}
+	dockerArgs = append(dockerArgs, fmt.Sprintf("%dm", memLimit))
 
 	dockerArgs = append(dockerArgs, "--cpus", "1")
+	dockerArgs = append(dockerArgs, "--pids-limit", "64")
 	dockerArgs = append(dockerArgs, "--read-only")
 	dockerArgs = append(dockerArgs, "--tmpfs", "/tmp:rw,exec,nosuid,size=256m")
 	dockerArgs = append(dockerArgs, "-v", workDir+":/code:ro")
@@ -474,11 +511,16 @@ func (s *SandboxService) runDocker(ctx context.Context, image, workDir string, c
 	dockerArgs = append(dockerArgs, image)
 	dockerArgs = append(dockerArgs, cmdArgs...)
 
-	timeout := 30
-	if timeLimit > timeout {
-		timeout = timeLimit
+	timeoutSec := timeLimit
+	if timeoutSec > 60 { // milliseconds to seconds conversion (e.g. 2000 ms -> 2s)
+		timeoutSec = (timeoutSec + 999) / 1000
 	}
-	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	if timeoutSec <= 0 {
+		timeoutSec = 10
+	} else if timeoutSec > 30 {
+		timeoutSec = 30
+	}
+	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
 	var stdout, stderr bytes.Buffer

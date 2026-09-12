@@ -45,7 +45,7 @@ func main() {
 	// Temporary migration to fix 'pending' applications
 	_, err = db.Exec(
 		context.Background(),
-		"UPDATE job_applications SET status = 'submitted' WHERE status = 'pending'",
+		"UPDATE job_applications SET status = 'submitted' WHERE status::text = 'pending'",
 	)
 	if err != nil {
 		log.Printf("Failed to run status migration: %v", err)
@@ -56,7 +56,7 @@ func main() {
 	// Ensure all tags in questions are populated in tags table
 	_, err = db.Exec(context.Background(), `
 		INSERT INTO tags (name, category, description, color)
-		SELECT DISTINCT LOWER(TRIM(t_name)), 'skill', 'Auto-created tag from question array', '#6366F1'
+		SELECT DISTINCT LOWER(TRIM(t_name)), 'skill'::tag_category, 'Auto-created tag from question array', '#6366F1'
 		FROM questions, unnest(tags) AS t_name
 		WHERE t_name IS NOT NULL AND TRIM(t_name) != ''
 		ON CONFLICT (name) DO NOTHING
@@ -173,6 +173,19 @@ func main() {
 	tagService := service.NewTagService(db)
 	questionService := service.NewQuestionService(db)
 
+	// Initialize Analyzer Client and start bounded background worker pool (2 workers)
+	analyzerClient := service.NewAnalyzerClient(cfg.AnalyzerURL, cfg.InternalServiceToken)
+	cvWorker := service.NewCVAnalysisWorker(db, analyzerClient, service.CVUploadDir, 2)
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	defer cancelWorker()
+	cvWorker.Start(workerCtx)
+	defer cvWorker.Stop()
+
+	// Initialize and start background retention worker (runs daily in small batches)
+	retentionWorker := service.NewRetentionWorker(db, 24*time.Hour)
+	retentionWorker.Start(workerCtx)
+	defer retentionWorker.Stop()
+
 	sandboxService := service.NewSandboxService()
 
 	// Initialize controllers
@@ -208,6 +221,7 @@ func main() {
 
 	quizAnswerFeedbackService := service.NewQuizAnswerFeedbackService(db)
 	quizAnswerFeedbackController := controller.NewQuizAnswerFeedbackController(quizAnswerFeedbackService)
+	healthController := controller.NewHealthController(db)
 
 	// Create router
 	handler := router.NewRouter(
@@ -226,6 +240,7 @@ func main() {
 		savedJobController,
 		adminController,
 		surveyQuestionController,
+		healthController,
 		authMiddleware,
 	)
 

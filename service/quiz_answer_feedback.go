@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
@@ -10,10 +11,11 @@ import (
 
 type QuizAnswerFeedbackService struct {
 	queries *database.Queries
+	db      database.DBTX
 }
 
 func NewQuizAnswerFeedbackService(db database.DBTX) *QuizAnswerFeedbackService {
-	return &QuizAnswerFeedbackService{queries: database.New(db)}
+	return &QuizAnswerFeedbackService{queries: database.New(db), db: db}
 }
 
 type QuizAnswerFeedbackResponse struct {
@@ -69,6 +71,33 @@ func (s *QuizAnswerFeedbackService) GetByAttempt(ctx context.Context, userID, qu
 }
 
 func (s *QuizAnswerFeedbackService) Upsert(ctx context.Context, userID, quizAttemptID, questionID, applicationID uuid.UUID, feedback string) (*QuizAnswerFeedbackResponse, error) {
+	// 1. Verify quiz attempt ownership and application match
+	var (
+		attemptUserID uuid.UUID
+		attemptAppID  uuid.UUID
+	)
+	err := s.db.QueryRow(ctx, `
+		SELECT user_id, application_id FROM quiz_attempts WHERE id = $1
+	`, quizAttemptID).Scan(&attemptUserID, &attemptAppID)
+	if err != nil {
+		return nil, fmt.Errorf("quiz attempt not found: %w", err)
+	}
+	if attemptUserID != userID {
+		return nil, fmt.Errorf("quiz attempt does not belong to this user")
+	}
+	if attemptAppID != applicationID {
+		return nil, fmt.Errorf("application does not match quiz attempt")
+	}
+
+	// 2. Verify question belongs to attempt
+	var dummy int
+	err = s.db.QueryRow(ctx, `
+		SELECT 1 FROM quiz_attempt_questions WHERE quiz_attempt_id = $1 AND question_id = $2
+	`, quizAttemptID, questionID).Scan(&dummy)
+	if err != nil {
+		return nil, fmt.Errorf("question does not belong to this quiz attempt")
+	}
+
 	item, err := s.queries.UpsertQuizAnswerFeedback(ctx, database.UpsertQuizAnswerFeedbackParams{
 		UserID:        feedbackUUID(userID),
 		QuizAttemptID: feedbackUUID(quizAttemptID),
@@ -91,7 +120,18 @@ func (s *QuizAnswerFeedbackService) Delete(ctx context.Context, userID, quizAtte
 	})
 }
 
-func (s *QuizAnswerFeedbackService) GetByApplication(ctx context.Context, applicationID uuid.UUID) ([]QuizAnswerFeedbackResponse, error) {
+func (s *QuizAnswerFeedbackService) GetByApplication(ctx context.Context, applicationID, requesterID uuid.UUID, isAdmin bool) ([]QuizAnswerFeedbackResponse, error) {
+	if !isAdmin {
+		var appUserID uuid.UUID
+		err := s.db.QueryRow(ctx, `SELECT user_id FROM job_applications WHERE id = $1`, applicationID).Scan(&appUserID)
+		if err != nil {
+			return nil, fmt.Errorf("application not found: %w", err)
+		}
+		if appUserID != requesterID {
+			return nil, fmt.Errorf("application does not belong to this user")
+		}
+	}
+
 	items, err := s.queries.ListQuizAnswerFeedbackByApplication(ctx, feedbackUUID(applicationID))
 	if err != nil {
 		return nil, err

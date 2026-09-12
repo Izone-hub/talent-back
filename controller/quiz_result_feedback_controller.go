@@ -99,6 +99,18 @@ func (c *QuizResultFeedbackController) Upsert(w http.ResponseWriter, r *http.Req
 	log.Printf("[QuizResultFeedback] Upserting feedback: user=%s attempt=%s rating=%s comment_len=%d", claims.UserID, quizAttemptID, req.Rating, len(req.Comment))
 	feedback, err := c.feedbackService.Upsert(r.Context(), claims.UserID, quizAttemptID, req.Rating, req.Comment)
 	if err != nil {
+		if strings.Contains(err.Error(), "does not belong") {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "after quiz completion") {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if errors.Is(err, service.ErrFeedbackAlreadySubmitted) {
 			writeError(w, http.StatusConflict, err.Error())
 			return

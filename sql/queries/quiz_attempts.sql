@@ -156,7 +156,8 @@ JOIN job_applications a ON qa.application_id = a.id
 JOIN users u ON qa.user_id = u.id
 LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
 WHERE qa.job_id = $1
-ORDER BY qa.completed_at DESC NULLS LAST;
+ORDER BY qa.completed_at DESC NULLS LAST
+LIMIT $2 OFFSET $3;
 
 -- List all quiz attempts for a user (admin view), across all jobs,
 -- including job info, applicant info and optional AI quiz results
@@ -191,7 +192,8 @@ JOIN users u ON qa.user_id = u.id
 JOIN jobs j ON qa.job_id = j.id
 LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
 WHERE qa.user_id = $1
-ORDER BY qa.completed_at DESC NULLS LAST;
+ORDER BY qa.completed_at DESC NULLS LAST
+LIMIT $2 OFFSET $3;
 
 -- Quiz results
 

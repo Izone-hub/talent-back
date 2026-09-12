@@ -23,10 +23,16 @@ func V1Routes(
 	savedJobController *controller.SavedJobController,
 	adminController *controller.AdminController,
 	surveyQuestionController *controller.SurveyQuestionController,
+	healthController *controller.HealthController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
 	mux := http.NewServeMux()
+
+	// -----------------------------------------------------------------------
+	// Health check route (no auth)
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /api/v1/health", healthController.CheckHealth)
 
 	// -----------------------------------------------------------------------
 	// Auth routes
@@ -49,20 +55,20 @@ func V1Routes(
 	mux.HandleFunc("DELETE /api/v1/jobs/{id}/save", authMiddleware.Authenticate(jobController.UnsaveJob))
 	mux.HandleFunc("GET /api/v1/jobs/saved", authMiddleware.Authenticate(jobController.ListSavedJobs))
 	mux.HandleFunc("GET /api/v1/jobs/{id}/saved", authMiddleware.Authenticate(jobController.IsJobSaved))
-	mux.HandleFunc("POST /api/v1/jobs", authMiddleware.Authenticate(jobController.CreateJob))
-	mux.HandleFunc("GET /api/v1/jobs/my", authMiddleware.Authenticate(jobController.ListMyJobs))
-	mux.HandleFunc("PUT /api/v1/jobs/{id}", authMiddleware.Authenticate(jobController.UpdateJob))
-	mux.HandleFunc("PATCH /api/v1/jobs/{id}/publish", authMiddleware.Authenticate(jobController.PublishJob))
-	mux.HandleFunc("PATCH /api/v1/jobs/{id}/close", authMiddleware.Authenticate(jobController.CloseJob))
-	mux.HandleFunc("PATCH /api/v1/jobs/{id}/archive", authMiddleware.Authenticate(jobController.ArchiveJob))
+	mux.HandleFunc("POST /api/v1/jobs", authMiddleware.Authenticate(authMiddleware.RequireAdmin(jobController.CreateJob)))
+	mux.HandleFunc("GET /api/v1/jobs/my", authMiddleware.Authenticate(authMiddleware.RequireAdmin(jobController.ListMyJobs)))
+	mux.HandleFunc("PUT /api/v1/jobs/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(jobController.UpdateJob)))
+	mux.HandleFunc("PATCH /api/v1/jobs/{id}/publish", authMiddleware.Authenticate(authMiddleware.RequireAdmin(jobController.PublishJob)))
+	mux.HandleFunc("PATCH /api/v1/jobs/{id}/close", authMiddleware.Authenticate(authMiddleware.RequireAdmin(jobController.CloseJob)))
+	mux.HandleFunc("PATCH /api/v1/jobs/{id}/archive", authMiddleware.Authenticate(authMiddleware.RequireAdmin(jobController.ArchiveJob)))
 	mux.HandleFunc("POST /api/v1/jobs/{id}/apply", authMiddleware.Authenticate(appController.ApplyForJob))
 
 	// -----------------------------------------------------------------------
 	// Survey / Screening question routes
 	// -----------------------------------------------------------------------
-	mux.HandleFunc("PUT /api/v1/jobs/{id}/survey-questions", authMiddleware.Authenticate(surveyQuestionController.UpsertQuestions))
+	mux.HandleFunc("PUT /api/v1/jobs/{id}/survey-questions", authMiddleware.Authenticate(authMiddleware.RequireAdmin(surveyQuestionController.UpsertQuestions)))
 	mux.HandleFunc("GET /api/v1/jobs/{id}/survey-questions", authMiddleware.OptionalAuthenticate(surveyQuestionController.GetQuestions))
-	mux.HandleFunc("DELETE /api/v1/jobs/{id}/survey-questions/{questionID}", authMiddleware.Authenticate(surveyQuestionController.DeleteQuestion))
+	mux.HandleFunc("DELETE /api/v1/jobs/{id}/survey-questions/{questionID}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(surveyQuestionController.DeleteQuestion)))
 	mux.HandleFunc("POST /api/v1/jobs/{id}/apply-survey", authMiddleware.Authenticate(surveyQuestionController.SubmitSurveyAnswers))
 
 	// -----------------------------------------------------------------------
@@ -97,10 +103,10 @@ func V1Routes(
 	// Tags routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("GET /api/v1/tags", authMiddleware.Authenticate(tagController.ListTags))
-	mux.HandleFunc("POST /api/v1/tags", authMiddleware.Authenticate(tagController.CreateTag))
+	mux.HandleFunc("POST /api/v1/tags", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.CreateTag)))
 	mux.HandleFunc("GET /api/v1/tags/{id}", authMiddleware.Authenticate(tagController.GetTag))
-	mux.HandleFunc("PUT /api/v1/tags/{id}", authMiddleware.Authenticate(tagController.UpdateTag))
-	mux.HandleFunc("DELETE /api/v1/tags/{id}", authMiddleware.Authenticate(tagController.DeleteTag))
+	mux.HandleFunc("PUT /api/v1/tags/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.UpdateTag)))
+	mux.HandleFunc("DELETE /api/v1/tags/{id}", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.DeleteTag)))
 	mux.HandleFunc("POST /api/v1/tags/assign", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.AssignTagToJob)))
 	mux.HandleFunc("POST /api/v1/tags/remove", authMiddleware.Authenticate(authMiddleware.RequireAdmin(tagController.RemoveTagFromJob)))
 	mux.HandleFunc("GET /api/v1/tags/{id}/jobs", authMiddleware.Authenticate(tagController.GetTagJobs))
@@ -185,10 +191,10 @@ func V1Routes(
 	// Intelligence routes
 	// -----------------------------------------------------------------------
 	mux.HandleFunc("POST /api/v1/contact", intelligenceController.Contact)
-	mux.HandleFunc("GET /api/v1/intelligence/{id}/summary", authMiddleware.Authenticate(intelligenceController.GetLatestUserSummary))
-	mux.HandleFunc("GET /api/v1/intelligence/user/{id}/summary", authMiddleware.Authenticate(intelligenceController.GetLatestUserSummary))
+	mux.HandleFunc("GET /api/v1/intelligence/{id}/summary", authMiddleware.Authenticate(authMiddleware.RequireAdmin(intelligenceController.GetLatestUserSummary)))
+	mux.HandleFunc("GET /api/v1/intelligence/user/{id}/summary", authMiddleware.Authenticate(authMiddleware.RequireAdmin(intelligenceController.GetLatestUserSummary)))
 	mux.HandleFunc("POST /api/v1/intelligence/github/{id}/fetch", authMiddleware.Authenticate(intelligenceController.FetchGitHubSnapshot))
-	mux.HandleFunc("POST /api/v1/analyze-cv", intelligenceController.AnalyzeCV)
+	mux.HandleFunc("POST /api/v1/analyze-cv", authMiddleware.Authenticate(authMiddleware.RequireAdmin(intelligenceController.AnalyzeCV)))
 	//mux.HandleFunc("POST /api/v1/generate-job-description", authMiddleware.Authenticate(intelligenceController.GenerateJobDescriptionPublic))
 	mux.HandleFunc("POST /api/v1/generate-questions", authMiddleware.Authenticate(intelligenceController.GenerateQuestionsPublic))
 

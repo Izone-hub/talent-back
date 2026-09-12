@@ -377,24 +377,17 @@ type AdminUser struct {
 	Email             *string    `json:"email,omitempty"`
 	AvatarURL         *string    `json:"avatar_url,omitempty"`
 	Name              *string    `json:"name,omitempty"`
-	Role              string     `json:"role"`
-	LastLoginAt       *string    `json:"last_login_at,omitempty"`
-	CreatedAt         *string    `json:"created_at,omitempty"`
-	UpdatedAt         *string    `json:"updated_at,omitempty"`
-	PublicRepos       int        `json:"public_repos"`
-	PublicGists       int        `json:"public_gists"`
-	Followers         int        `json:"followers"`
-	Following         int        `json:"following"`
-	Hireable          bool       `json:"hireable"`
-	Blog              *string    `json:"blog,omitempty"`
-	Company           *string    `json:"company,omitempty"`
-	Location          *string    `json:"location,omitempty"`
-	Bio               *string    `json:"bio,omitempty"`
-	TwitterUsername   *string    `json:"twitter_username,omitempty"`
-	TopLanguages      []string   `json:"top_languages"`
-	ContributionCount int        `json:"contribution_count"`
-	AcceptanceJobID   *uuid.UUID `json:"acceptance_job_id,omitempty"`
-	Categories        []string   `json:"categories"`
+	Role            string     `json:"role"`
+	LastLoginAt     *string    `json:"last_login_at,omitempty"`
+	CreatedAt       *string    `json:"created_at,omitempty"`
+	UpdatedAt       *string    `json:"updated_at,omitempty"`
+	PublicRepos     int        `json:"public_repos"`
+	Followers       int        `json:"followers"`
+	Following       int        `json:"following"`
+	Bio             *string    `json:"bio,omitempty"`
+	TopLanguages    []string   `json:"top_languages"`
+	AcceptanceJobID *uuid.UUID `json:"acceptance_job_id,omitempty"`
+	Categories      []string   `json:"categories"`
 }
 
 // ListAllUsers returns a paginated list of registered users, newest first,
@@ -446,30 +439,23 @@ func adminUserFromDB(r database.User) AdminUser {
 		categories = []string{}
 	}
 	return AdminUser{
-		ID:                pgUUIDToUUID(r.ID),
-		GithubID:          r.GithubID,
-		GithubUsername:    r.GithubUsername,
-		Email:             pgTextToStrPtr(r.Email),
-		AvatarURL:         pgTextToStrPtr(r.AvatarUrl),
-		Name:              pgTextToStrPtr(r.Name),
-		Role:              r.Role,
-		LastLoginAt:       pgTimestampToTimePtrStr(r.LastLoginAt),
-		CreatedAt:         pgTimestampToTimePtrStr(r.CreatedAt),
-		UpdatedAt:         pgTimestampToTimePtrStr(r.UpdatedAt),
-		PublicRepos:       int(r.PublicRepos.Int32),
-		PublicGists:       int(r.PublicGists.Int32),
-		Followers:         int(r.Followers.Int32),
-		Following:         int(r.Following.Int32),
-		Hireable:          r.Hireable.Bool,
-		Blog:              pgTextToStrPtr(r.Blog),
-		Company:           pgTextToStrPtr(r.Company),
-		Location:          pgTextToStrPtr(r.Location),
-		Bio:               pgTextToStrPtr(r.Bio),
-		TwitterUsername:   pgTextToStrPtr(r.TwitterUsername),
-		TopLanguages:      r.TopLanguages,
-		ContributionCount: int(r.ContributionCount.Int32),
-		AcceptanceJobID:   pgUUIDToUUIDPtr(r.AcceptanceJobID),
-		Categories:        categories,
+		ID:              pgUUIDToUUID(r.ID),
+		GithubID:        r.GithubID,
+		GithubUsername:  r.GithubUsername,
+		Email:           pgTextToStrPtr(r.Email),
+		AvatarURL:       pgTextToStrPtr(r.AvatarUrl),
+		Name:            pgTextToStrPtr(r.Name),
+		Role:            r.Role,
+		LastLoginAt:     pgTimestampToTimePtrStr(r.LastLoginAt),
+		CreatedAt:       pgTimestampToTimePtrStr(r.CreatedAt),
+		UpdatedAt:       pgTimestampToTimePtrStr(r.UpdatedAt),
+		PublicRepos:     int(r.PublicRepos.Int32),
+		Followers:       int(r.Followers.Int32),
+		Following:       int(r.Following.Int32),
+		Bio:             pgTextToStrPtr(r.Bio),
+		TopLanguages:    r.TopLanguages,
+		AcceptanceJobID: pgUUIDToUUIDPtr(r.AcceptanceJobID),
+		Categories:      categories,
 	}
 }
 

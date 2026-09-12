@@ -26,10 +26,17 @@ func NewRouter(
 	savedJobController *controller.SavedJobController,
 	adminController *controller.AdminController,
 	surveyQuestionController *controller.SurveyQuestionController,
+	healthController *controller.HealthController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
 	mux := http.NewServeMux()
+
+	// -----------------------------------------------------------------------
+	// Health check endpoints (for Docker / Kubernetes / load balancer probes)
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /healthz", healthController.CheckHealth)
+	mux.HandleFunc("GET /health", healthController.CheckHealth)
 
 	// Root path handler to check API status and avoid 404
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +93,7 @@ func NewRouter(
 		savedJobController,
 		adminController,
 		surveyQuestionController,
+		healthController,
 		authMiddleware,
 	)
 

@@ -44,6 +44,13 @@ func (m *AuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		// Ensure claims.Role reflects current database role if token is stale
+		if claims.Role != "admin" {
+			if user, err := m.authService.GetUserByID(r.Context(), claims.UserID); err == nil && user != nil && user.Role == "admin" {
+				claims.Role = "admin"
+			}
+		}
+
 		// Add claims to request context
 		ctx := context.WithValue(r.Context(), "user", claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -72,6 +79,13 @@ func (m *AuthMiddleware) OptionalAuthenticate(next http.HandlerFunc) http.Handle
 			return
 		}
 
+		// Ensure claims.Role reflects current database role if token is stale
+		if claims.Role != "admin" {
+			if user, err := m.authService.GetUserByID(r.Context(), claims.UserID); err == nil && user != nil && user.Role == "admin" {
+				claims.Role = "admin"
+			}
+		}
+
 		ctx := context.WithValue(r.Context(), "user", claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}
@@ -87,6 +101,12 @@ func (m *AuthMiddleware) RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if claims.Role != "admin" {
+			// Fallback check: verify against database in case claims.Role was not updated
+			if user, err := m.authService.GetUserByID(r.Context(), claims.UserID); err == nil && user != nil && user.Role == "admin" {
+				claims.Role = "admin"
+				next.ServeHTTP(w, r)
+				return
+			}
 			http.Error(w, "Admin access required", http.StatusForbidden)
 			return
 		}

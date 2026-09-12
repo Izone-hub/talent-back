@@ -271,7 +271,25 @@ func (s *QuizResultFeedbackService) Upsert(ctx context.Context, userID, quizAtte
 		return nil, err
 	}
 
-	// 2. Check if feedback has already been submitted (one-time feedback rule)
+	// 2. Verify quiz attempt ownership and completion status
+	var (
+		attemptUserID uuid.UUID
+		attemptStatus string
+	)
+	err := s.db.QueryRow(ctx, `
+		SELECT user_id, status FROM quiz_attempts WHERE id = $1
+	`, quizAttemptID).Scan(&attemptUserID, &attemptStatus)
+	if err != nil {
+		return nil, fmt.Errorf("quiz attempt not found: %w", err)
+	}
+	if attemptUserID != userID {
+		return nil, fmt.Errorf("quiz attempt does not belong to this user")
+	}
+	if attemptStatus != "completed" {
+		return nil, fmt.Errorf("quiz feedback can only be submitted after quiz completion")
+	}
+
+	// 3. Check if feedback has already been submitted (one-time feedback rule)
 	existing, err := s.queries.GetQuizResultFeedback(ctx, database.GetQuizResultFeedbackParams{
 		UserID:        feedbackUUID(userID),
 		QuizAttemptID: feedbackUUID(quizAttemptID),

@@ -991,7 +991,14 @@ JOIN users u ON qa.user_id = u.id
 LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
 WHERE qa.job_id = $1
 ORDER BY qa.completed_at DESC NULLS LAST
+LIMIT $2 OFFSET $3
 `
+
+type ListQuizAttemptsByJobParams struct {
+	JobID  pgtype.UUID
+	Limit  int32
+	Offset int32
+}
 
 type ListQuizAttemptsByJobRow struct {
 	QuizID           pgtype.UUID
@@ -1017,8 +1024,8 @@ type ListQuizAttemptsByJobRow struct {
 
 // List all quiz attempts for a job (admin view), including applicant info
 // and optional AI quiz results
-func (q *Queries) ListQuizAttemptsByJob(ctx context.Context, jobID pgtype.UUID) ([]ListQuizAttemptsByJobRow, error) {
-	rows, err := q.db.Query(ctx, listQuizAttemptsByJob, jobID)
+func (q *Queries) ListQuizAttemptsByJob(ctx context.Context, arg ListQuizAttemptsByJobParams) ([]ListQuizAttemptsByJobRow, error) {
+	rows, err := q.db.Query(ctx, listQuizAttemptsByJob, arg.JobID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -1089,7 +1096,14 @@ JOIN jobs j ON qa.job_id = j.id
 LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
 WHERE qa.user_id = $1
 ORDER BY qa.completed_at DESC NULLS LAST
+LIMIT $2 OFFSET $3
 `
+
+type ListQuizAttemptsByUserParams struct {
+	UserID pgtype.UUID
+	Limit  int32
+	Offset int32
+}
 
 type ListQuizAttemptsByUserRow struct {
 	QuizID           pgtype.UUID
@@ -1118,8 +1132,8 @@ type ListQuizAttemptsByUserRow struct {
 
 // List all quiz attempts for a user (admin view), across all jobs,
 // including job info, applicant info and optional AI quiz results
-func (q *Queries) ListQuizAttemptsByUser(ctx context.Context, userID pgtype.UUID) ([]ListQuizAttemptsByUserRow, error) {
-	rows, err := q.db.Query(ctx, listQuizAttemptsByUser, userID)
+func (q *Queries) ListQuizAttemptsByUser(ctx context.Context, arg ListQuizAttemptsByUserParams) ([]ListQuizAttemptsByUserRow, error) {
+	rows, err := q.db.Query(ctx, listQuizAttemptsByUser, arg.UserID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

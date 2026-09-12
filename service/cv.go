@@ -81,6 +81,7 @@ func (rl *rateLimiter) allow(userID uuid.UUID) bool {
 // CvService handles all CV upload and management logic.
 type CvService struct {
 	queries     *database.Queries
+	db          database.DBTX
 	scanner     *ClamAVScanner
 	rateLimiter *rateLimiter
 	uploadDir   string // base directory for CV storage
@@ -95,10 +96,46 @@ func NewCvService(db database.DBTX, scanner *ClamAVScanner) *CvService {
 
 	return &CvService{
 		queries:     database.New(db),
+		db:          db,
 		scanner:     scanner,
 		rateLimiter: newRateLimiter(),
 		uploadDir:   CVUploadDir,
 	}
+}
+
+// EnqueueAnalysisJob enqueues a CV analysis task into the PostgreSQL job queue with symlink-safe path containment.
+func (s *CvService) EnqueueAnalysisJob(ctx context.Context, userID uuid.UUID, cvVersion int, filePath, fileName, githubUsername string) error {
+	// Resolve base directory real path
+	realUploadDir, err := filepath.EvalSymlinks(s.uploadDir)
+	if err != nil {
+		realUploadDir = filepath.Clean(s.uploadDir)
+	} else {
+		realUploadDir = filepath.Clean(realUploadDir)
+	}
+
+	// Resolve target file real path (prevent symlink bypass)
+	realFilePath, err := filepath.EvalSymlinks(filePath)
+	if err != nil {
+		return fmt.Errorf("invalid file path: could not resolve target file: %w", err)
+	}
+	realFilePath = filepath.Clean(realFilePath)
+
+	rel, err := filepath.Rel(realUploadDir, realFilePath)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
+		return fmt.Errorf("security violation: file path resolved outside trusted upload directory")
+	}
+
+	query := `
+		INSERT INTO cv_analysis_jobs (user_id, cv_version, file_path, file_name, github_username, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
+		ON CONFLICT (user_id, cv_version) WHERE status IN ('pending', 'processing') DO NOTHING
+	`
+	_, err = s.db.Exec(ctx, query, userID, cvVersion, realFilePath, fileName, githubUsername)
+	if err != nil {
+		return fmt.Errorf("failed to enqueue CV analysis job: %w", err)
+	}
+	log.Printf("Enqueued CV analysis job for user %s (version %d)", userID, cvVersion)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

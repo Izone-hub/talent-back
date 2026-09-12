@@ -55,7 +55,7 @@ func (c *ApplicationController) ApplyForJob(w http.ResponseWriter, r *http.Reque
 	}
 
 	if cv, err := c.cvService.GetCurrentCV(r.Context(), claims.UserID); err == nil {
-		go triggerCVAnalysis(cv.FilePath, cv.FileName, claims.GithubUsername, cv.Version)
+		_ = c.cvService.EnqueueAnalysisJob(r.Context(), claims.UserID, cv.Version, cv.FilePath, cv.FileName, claims.GithubUsername)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -122,6 +122,12 @@ func (c *ApplicationController) GetUserApplications(w http.ResponseWriter, r *ht
 }
 
 func (c *ApplicationController) GetApplicationDetail(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	idStr := r.PathValue("id")
 	appID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -132,6 +138,13 @@ func (c *ApplicationController) GetApplicationDetail(w http.ResponseWriter, r *h
 	app, err := c.appService.GetApplicationDetail(r.Context(), appID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Application not found: "+err.Error())
+		return
+	}
+
+	// Ownership check: must be admin or application owner
+	appOwnerID := uuid.UUID(app.UserID.Bytes)
+	if claims.Role != "admin" && claims.UserID != appOwnerID {
+		writeError(w, http.StatusForbidden, "Access denied: you do not own this application")
 		return
 	}
 
