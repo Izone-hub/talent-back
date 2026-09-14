@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/config"
@@ -46,13 +50,30 @@ func NewAuthService(cfg *config.Config, githubService *GithubService, db databas
 	}
 }
 
-// GitHubAuthURL returns the GitHub OAuth authorization URL for the login redirect.
-// Exposes config needed for the OAuth flow without exporting the whole config.
-func (s *AuthService) GitHubAuthURL() string {
+// GenerateRandomState generates a 32-byte cryptographically secure random hex string for OAuth CSRF protection.
+func GenerateRandomState() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// GitHubAuthURL returns the GitHub OAuth authorization URL with CSRF state attached.
+func (s *AuthService) GitHubAuthURL(state string) string {
 	return "https://github.com/login/oauth/authorize?" +
-		"client_id=" + s.config.GitHubClientID +
-		"&redirect_uri=" + s.config.GitHubRedirectURL +
-		"&scope=user:email"
+		"client_id=" + url.QueryEscape(s.config.GitHubClientID) +
+		"&redirect_uri=" + url.QueryEscape(s.config.GitHubRedirectURL) +
+		"&scope=user:email" +
+		"&state=" + url.QueryEscape(state)
+}
+
+// GetFrontendURL returns the configured frontend URL for post-authentication redirect.
+func (s *AuthService) GetFrontendURL() string {
+	if s.config.FrontendURL != "" {
+		return strings.TrimSuffix(s.config.FrontendURL, "/")
+	}
+	return "http://localhost:5173"
 }
 
 // HandleGitHubCallback processes GitHub OAuth callback
@@ -87,13 +108,13 @@ func (s *AuthService) HandleGitHubCallback(ctx context.Context, code string) (*A
 
 	isConfiguredAdmin := false
 	for _, admin := range s.config.GetAdminUsernames() {
-		if admin == githubUser.Login {
+		if strings.EqualFold(strings.TrimSpace(admin), strings.TrimSpace(githubUser.Login)) {
 			isConfiguredAdmin = true
 			break
 		}
 	}
 
-	if allowlisted || isConfiguredAdmin {
+	if allowlisted || isConfiguredAdmin || dbUser.Role == "admin" {
 		if dbUser.Role != "admin" {
 			dbUser, err = s.queries.UpdateUserRole(ctx, database.UpdateUserRoleParams{
 				GithubID: githubUser.ID,
@@ -171,17 +192,10 @@ func (s *AuthService) upsertUserFromGitHub(ctx context.Context, githubUser *GitH
 		GithubAccessToken:    strToPgText(tokenResponse.AccessToken),
 		GithubTokenExpiresAt: pgtype.Timestamp{Time: expiresAt, Valid: true},
 		PublicRepos:          pgtype.Int4{Int32: int32(githubUser.PublicRepos), Valid: true},
-		PublicGists:          pgtype.Int4{Int32: int32(githubUser.PublicGists), Valid: true},
 		Followers:            pgtype.Int4{Int32: int32(githubUser.Followers), Valid: true},
 		Following:            pgtype.Int4{Int32: int32(githubUser.Following), Valid: true},
-		Hireable:             pgtype.Bool{Bool: githubUser.Hireable, Valid: true},
-		Blog:                 strToPgText(githubUser.Blog),
-		Company:              strToPgText(githubUser.Company),
-		Location:             strToPgText(githubUser.Location),
 		Bio:                  strToPgText(githubUser.Bio),
-		TwitterUsername:      strToPgText(githubUser.TwitterUsername),
 		TopLanguages:         topLanguages,
-		ContributionCount:    pgtype.Int4{Int32: 0, Valid: true},
 	})
 }
 
@@ -213,17 +227,10 @@ func dbUserToModel(u database.User) models.User {
 		CreatedAt:            pgTimestampToTime(u.CreatedAt),
 		UpdatedAt:            pgTimestampToTime(u.UpdatedAt),
 		PublicRepos:          int(u.PublicRepos.Int32),
-		PublicGists:          int(u.PublicGists.Int32),
 		Followers:            int(u.Followers.Int32),
 		Following:            int(u.Following.Int32),
-		Hireable:             u.Hireable.Bool,
-		Blog:                 pgTextToStrPtr(u.Blog),
-		Company:              pgTextToStrPtr(u.Company),
-		Location:             pgTextToStrPtr(u.Location),
 		Bio:                  pgTextToStrPtr(u.Bio),
-		TwitterUsername:      pgTextToStrPtr(u.TwitterUsername),
 		TopLanguages:         topLangs,
-		ContributionCount:    int(u.ContributionCount.Int32),
 		AcceptanceJobID:      pgUUIDToUUIDPtr(u.AcceptanceJobID),
 	}
 }

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 
@@ -17,14 +18,61 @@ func NewAuthController(authService *service.AuthService) *AuthController {
 	}
 }
 
-// GitHubLogin initiates GitHub OAuth flow
+// GitHubLogin initiates GitHub OAuth flow with CSRF state protection
 func (c *AuthController) GitHubLogin(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, c.authService.GitHubAuthURL(), http.StatusTemporaryRedirect)
+	state, err := service.GenerateRandomState()
+	if err != nil {
+		http.Error(w, "Failed to generate OAuth state", http.StatusInternalServerError)
+		return
+	}
+
+	// Set state cookie (HttpOnly, SameSite=Lax, 10 min expiry)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		MaxAge:   600, // 10 minutes
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+	})
+
+	http.Redirect(w, r, c.authService.GitHubAuthURL(state), http.StatusTemporaryRedirect)
 }
 
-// GitHubCallback handles the OAuth callback from GitHub
+// GitHubCallback handles the OAuth callback from GitHub with state verification
 func (c *AuthController) GitHubCallback(w http.ResponseWriter, r *http.Request) {
-	// Get the code from query parameters
+	// 1. Verify CSRF state parameter
+	stateCookie, err := r.Cookie("oauth_state")
+	if err != nil || stateCookie.Value == "" {
+		http.Error(w, "Missing or expired OAuth state cookie", http.StatusBadRequest)
+		return
+	}
+
+	queryState := r.URL.Query().Get("state")
+	if queryState == "" {
+		http.Error(w, "Missing OAuth state parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Clear the state cookie immediately
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+	})
+
+	// Constant-time compare to prevent timing side-channel attacks
+	if subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(queryState)) != 1 {
+		http.Error(w, "Invalid OAuth state parameter", http.StatusBadRequest)
+		return
+	}
+
+	// 2. Get the code from query parameters
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		http.Error(w, "Code not provided", http.StatusBadRequest)
@@ -39,7 +87,7 @@ func (c *AuthController) GitHubCallback(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Redirect back to frontend with the token
-	frontendURL := "http://localhost:5173/auth/callback?token=" + authResponse.Token
+	frontendURL := c.authService.GetFrontendURL() + "/auth/callback?token=" + authResponse.Token
 	http.Redirect(w, r, frontendURL, http.StatusTemporaryRedirect)
 }
 

@@ -156,7 +156,8 @@ JOIN job_applications a ON qa.application_id = a.id
 JOIN users u ON qa.user_id = u.id
 LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
 WHERE qa.job_id = $1
-ORDER BY qa.completed_at DESC NULLS LAST;
+ORDER BY qa.completed_at DESC NULLS LAST
+LIMIT $2 OFFSET $3;
 
 -- List all quiz attempts for a user (admin view), across all jobs,
 -- including job info, applicant info and optional AI quiz results
@@ -191,7 +192,8 @@ JOIN users u ON qa.user_id = u.id
 JOIN jobs j ON qa.job_id = j.id
 LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
 WHERE qa.user_id = $1
-ORDER BY qa.completed_at DESC NULLS LAST;
+ORDER BY qa.completed_at DESC NULLS LAST
+LIMIT $2 OFFSET $3;
 
 -- Quiz results
 
@@ -256,5 +258,80 @@ SELECT
     qa.*
 FROM quiz_answers qa
 JOIN quiz_attempts qat ON qa.quiz_attempt_id = qat.id
-WHERE qat.user_id = $1
+WHERE qat.user_id = $1 AND qat.status = 'completed'
 ORDER BY qa.created_at DESC;
+
+-- Attempt question management
+
+-- name: CreateQuizAttemptQuestion :one
+INSERT INTO quiz_attempt_questions (
+    quiz_attempt_id, question_id, question_order
+) VALUES ($1, $2, $3)
+RETURNING *;
+
+-- name: GetQuizAttemptQuestions :many
+SELECT qaq.id, qaq.quiz_attempt_id, qaq.question_id, qaq.question_order, qaq.created_at,
+       q.question_text, q.question_type, q.difficulty, q.options, q.correct_answer, q.time_limit_seconds
+FROM quiz_attempt_questions qaq
+JOIN questions q ON q.id = qaq.question_id
+WHERE qaq.quiz_attempt_id = $1
+ORDER BY qaq.question_order ASC;
+
+-- name: GetNextUnansweredAttemptQuestion :one
+SELECT 
+    qaq.quiz_attempt_id,
+    qaq.question_order,
+    q.id AS question_id,
+    q.question_text,
+    q.question_type,
+    q.options,
+    q.correct_answer,
+    q.difficulty,
+    q.time_limit_seconds
+FROM quiz_attempt_questions qaq
+JOIN questions q ON q.id = qaq.question_id
+WHERE qaq.quiz_attempt_id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM quiz_answers qa
+      WHERE qa.quiz_attempt_id = qaq.quiz_attempt_id
+        AND qa.question_id = qaq.question_id
+  )
+ORDER BY qaq.question_order ASC
+LIMIT 1;
+
+-- name: GetQuizAttemptQuestionByQuestionID :one
+SELECT * FROM quiz_attempt_questions
+WHERE quiz_attempt_id = $1 AND question_id = $2;
+
+-- name: GetAttemptQuestionByOrder :one
+SELECT 
+    qaq.quiz_attempt_id,
+    qaq.question_order,
+    q.id AS question_id,
+    q.question_text,
+    q.question_type,
+    q.options,
+    q.correct_answer,
+    q.difficulty,
+    q.time_limit_seconds
+FROM quiz_attempt_questions qaq
+JOIN questions q ON q.id = qaq.question_id
+WHERE qaq.quiz_attempt_id = $1 AND qaq.question_order = $2;
+
+-- name: CountAttemptQuestions :one
+SELECT COUNT(*) FROM quiz_attempt_questions
+WHERE quiz_attempt_id = $1;
+
+-- name: CountAnsweredAttemptQuestions :one
+SELECT COUNT(*) FROM quiz_answers
+WHERE quiz_attempt_id = $1;
+
+-- name: GetExpectedNextQuestionOrder :one
+SELECT COALESCE(MIN(qaq.question_order), 0)::int AS next_order
+FROM quiz_attempt_questions qaq
+WHERE qaq.quiz_attempt_id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM quiz_answers qa
+      WHERE qa.quiz_attempt_id = qaq.quiz_attempt_id
+        AND qa.question_id = qaq.question_id
+  );

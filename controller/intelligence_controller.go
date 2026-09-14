@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
+	"net/mail"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -87,26 +89,55 @@ type AISummaryResponse struct {
 	Model      string `json:"model"`
 }
 
+type IntelligenceQuizAnswer struct {
+	ID               pgtype.UUID      `json:"id"`
+	QuizAttemptID    pgtype.UUID      `json:"quiz_attempt_id"`
+	QuestionID       pgtype.UUID      `json:"question_id"`
+	UserAnswer       pgtype.Text      `json:"user_answer"`
+	IsCorrect        pgtype.Bool      `json:"is_correct"`
+	LastSavedAt      pgtype.Timestamp `json:"last_saved_at"`
+	SaveCount        pgtype.Int4      `json:"save_count"`
+	TimeSpentSeconds pgtype.Int4      `json:"time_spent_seconds"`
+	ExecutionTimeMs  pgtype.Int4      `json:"execution_time_ms"`
+	MemoryUsedMb     pgtype.Float8    `json:"memory_used_mb"`
+	IsSkipped        pgtype.Bool      `json:"is_skipped"`
+	IsReviewed       pgtype.Bool      `json:"is_reviewed"`
+	CreatedAt        pgtype.Timestamp `json:"created_at"`
+	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+}
+
 type IntelligenceReport struct {
-	UserID      uuid.UUID             `json:"user_id"`
-	GitHub      GitHubIntelligence    `json:"github_intelligence"`
-	CVSignals   *CVSignalsResponse    `json:"cv_signals,omitempty"`
-	AISummary   *AISummaryResponse    `json:"ai_summary,omitempty"`
-	QuizAnswers []database.QuizAnswer `json:"quiz_answers,omitempty"`
+	UserID      uuid.UUID                `json:"user_id"`
+	GitHub      GitHubIntelligence       `json:"github_intelligence"`
+	CVSignals   *CVSignalsResponse       `json:"cv_signals,omitempty"`
+	AISummary   *AISummaryResponse       `json:"ai_summary,omitempty"`
+	QuizAnswers []IntelligenceQuizAnswer `json:"quiz_answers,omitempty"`
 }
 
 // --- Handler ---
 
 func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	idStr := r.PathValue("id")
 	if idStr == "" {
-		http.Error(w, "Missing user ID", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Missing user ID")
 		return
 	}
 
 	targetUserID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+
+	// Only the user themselves or an admin can fetch the GitHub intelligence snapshot
+	if claims.Role != "admin" && claims.UserID != targetUserID {
+		writeError(w, http.StatusForbidden, "Access denied: you can only fetch your own GitHub intelligence")
 		return
 	}
 
@@ -114,34 +145,50 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 	copy(pgID.Bytes[:], targetUserID[:])
 	pgID.Valid = true
 
-	// 1. Fetch user to get GithubAccessToken
-	dbUser, err := c.queries.GetUserByID(r.Context(), pgID)
-	if err != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
-		return
+	// 1. Check for existing cached snapshot (one current snapshot per user, 24h freshness)
+	var githubUser *service.GitHubUser
+	var repos []service.GitHubRepo
+
+	snapshot, err := c.queries.GetLatestGitHubSnapshot(r.Context(), targetUserID)
+	if err == nil && snapshot.UpdatedAt.Valid && time.Since(snapshot.UpdatedAt.Time) < 24*time.Hour && len(snapshot.RawData) > 0 {
+		var cached struct {
+			User  *service.GitHubUser  `json:"user"`
+			Repos []service.GitHubRepo `json:"repos"`
+		}
+		if unmarshalErr := json.Unmarshal(snapshot.RawData, &cached); unmarshalErr == nil && cached.User != nil {
+			githubUser = cached.User
+			repos = cached.Repos
+		}
 	}
 
-	// 2. Call GitHub API
-	githubUser, repos, err := c.githubService.GetUserWithDetails(r.Context(), dbUser.GithubAccessToken.String)
-	if err != nil {
-		http.Error(w, "Failed to fetch from GitHub: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// 2. Fetch from GitHub API and upsert single user snapshot if cache missed or expired
+	if githubUser == nil {
+		dbUser, err := c.queries.GetUserByID(r.Context(), pgID)
+		if err != nil {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
 
-	// 3. Serialize raw data and save snapshot
-	rawData := map[string]interface{}{"user": githubUser, "repos": repos}
-	rawBytes, _ := json.Marshal(rawData)
+		githubUser, repos, err = c.githubService.GetUserWithDetails(r.Context(), dbUser.GithubAccessToken.String)
+		if err != nil {
+			http.Error(w, "Failed to fetch from GitHub: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-	_, err = c.queries.CreateGitHubSnapshot(r.Context(), database.CreateGitHubSnapshotParams{
-		UserID:      targetUserID,
-		PublicRepos: pgtype.Int4{Int32: int32(githubUser.PublicRepos), Valid: true},
-		Followers:   pgtype.Int4{Int32: int32(githubUser.Followers), Valid: true},
-		Following:   pgtype.Int4{Int32: int32(githubUser.Following), Valid: true},
-		RawData:     rawBytes,
-	})
-	if err != nil {
-		http.Error(w, "Failed to save snapshot: "+err.Error(), http.StatusInternalServerError)
-		return
+		rawData := map[string]interface{}{"user": githubUser, "repos": repos}
+		rawBytes, _ := json.Marshal(rawData)
+
+		_, err = c.queries.CreateGitHubSnapshot(r.Context(), database.CreateGitHubSnapshotParams{
+			UserID:      targetUserID,
+			PublicRepos: pgtype.Int4{Int32: int32(githubUser.PublicRepos), Valid: true},
+			Followers:   pgtype.Int4{Int32: int32(githubUser.Followers), Valid: true},
+			Following:   pgtype.Int4{Int32: int32(githubUser.Following), Valid: true},
+			RawData:     rawBytes,
+		})
+		if err != nil {
+			http.Error(w, "Failed to save snapshot: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// 4. Compute GitHub Intelligence signals
@@ -186,10 +233,29 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 		}
 	}
 
-	// 7. Attach quiz answers if available
+	// 7. Attach quiz answers if available (excluding code_output)
 	quizAnswers, err := c.queries.GetUserQuizAnswers(r.Context(), pgID)
 	if err == nil {
-		report.QuizAnswers = quizAnswers
+		cleanAnswers := make([]IntelligenceQuizAnswer, len(quizAnswers))
+		for i, a := range quizAnswers {
+			cleanAnswers[i] = IntelligenceQuizAnswer{
+				ID:               a.ID,
+				QuizAttemptID:    a.QuizAttemptID,
+				QuestionID:       a.QuestionID,
+				UserAnswer:       a.UserAnswer,
+				IsCorrect:        a.IsCorrect,
+				LastSavedAt:      a.LastSavedAt,
+				SaveCount:        a.SaveCount,
+				TimeSpentSeconds: a.TimeSpentSeconds,
+				ExecutionTimeMs:  a.ExecutionTimeMs,
+				MemoryUsedMb:     a.MemoryUsedMb,
+				IsSkipped:        a.IsSkipped,
+				IsReviewed:       a.IsReviewed,
+				CreatedAt:        a.CreatedAt,
+				UpdatedAt:        a.UpdatedAt,
+			}
+		}
+		report.QuizAnswers = cleanAnswers
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -197,6 +263,12 @@ func (c *IntelligenceController) FetchGitHubSnapshot(w http.ResponseWriter, r *h
 }
 
 func (c *IntelligenceController) GetLatestUserSummary(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("user").(*service.Claims)
+	if !ok || claims.Role != "admin" {
+		writeError(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+
 	idStr := r.PathValue("id")
 	if idStr == "" {
 		writeError(w, http.StatusBadRequest, "Missing user ID")
@@ -434,46 +506,39 @@ func (c *IntelligenceController) Contact(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if strings.TrimSpace(req.FirstName) == "" ||
-		strings.TrimSpace(req.LastName) == "" ||
-		strings.TrimSpace(req.Email) == "" ||
-		strings.TrimSpace(req.ProjectDetails) == "" {
+	req.FirstName = strings.TrimSpace(req.FirstName)
+	req.LastName = strings.TrimSpace(req.LastName)
+	req.Email = strings.TrimSpace(req.Email)
+	req.Company = strings.TrimSpace(req.Company)
+	req.BudgetRange = strings.TrimSpace(req.BudgetRange)
+	req.ProjectDetails = strings.TrimSpace(req.ProjectDetails)
+	if req.FirstName == "" || req.LastName == "" || req.Email == "" || req.ProjectDetails == "" {
 		writeError(w, http.StatusBadRequest, "Required contact fields are missing")
 		return
 	}
+	if len(req.FirstName) > 100 || len(req.LastName) > 100 || len(req.Email) > 255 || len(req.Company) > 255 || len(req.BudgetRange) > 100 || len(req.ProjectDetails) > 10000 {
+		writeError(w, http.StatusBadRequest, "Contact request fields are too long")
+		return
+	}
+	parsedEmail, err := mail.ParseAddress(req.Email)
+	if err != nil || parsedEmail.Address != req.Email {
+		writeError(w, http.StatusBadRequest, "Invalid email address")
+		return
+	}
 
-	payload, err := json.Marshal(req)
-	if err != nil {
+	company := pgtype.Text{String: req.Company, Valid: req.Company != ""}
+	budgetRange := pgtype.Text{String: req.BudgetRange, Valid: req.BudgetRange != ""}
+	if _, err := c.queries.CreateContactRequest(r.Context(), database.CreateContactRequestParams{
+		FirstName: req.FirstName, LastName: req.LastName, Email: req.Email,
+		Company: company, BudgetRange: budgetRange, ProjectDetails: req.ProjectDetails,
+	}); err != nil {
+		log.Printf("ERROR: failed to store contact request: %v", err)
 		writeError(w, http.StatusInternalServerError, "Unable to process contact request")
-		return
-	}
-
-	analyzerRequest, err := c.newAnalyzerRequest(
-		http.MethodPost,
-		c.getAnalyzerURL()+"/api/v1/contact",
-		bytes.NewReader(payload),
-	)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Unable to process contact request")
-		return
-	}
-	analyzerRequest.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(analyzerRequest)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "Contact service is temporarily unavailable")
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		writeError(w, http.StatusBadGateway, "Unable to send contact inquiry")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"message":"Contact inquiry sent successfully"}`))
 }
 

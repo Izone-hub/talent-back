@@ -90,6 +90,30 @@ func (q *Queries) CompleteQuiz(ctx context.Context, arg CompleteQuizParams) (Qui
 	return i, err
 }
 
+const countAnsweredAttemptQuestions = `-- name: CountAnsweredAttemptQuestions :one
+SELECT COUNT(*) FROM quiz_answers
+WHERE quiz_attempt_id = $1
+`
+
+func (q *Queries) CountAnsweredAttemptQuestions(ctx context.Context, quizAttemptID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAnsweredAttemptQuestions, quizAttemptID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAttemptQuestions = `-- name: CountAttemptQuestions :one
+SELECT COUNT(*) FROM quiz_attempt_questions
+WHERE quiz_attempt_id = $1
+`
+
+func (q *Queries) CountAttemptQuestions(ctx context.Context, quizAttemptID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAttemptQuestions, quizAttemptID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createQuizAttempt = `-- name: CreateQuizAttempt :one
 
 INSERT INTO quiz_attempts (
@@ -143,6 +167,34 @@ func (q *Queries) CreateQuizAttempt(ctx context.Context, arg CreateQuizAttemptPa
 		&i.AutoSaveIntervalSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createQuizAttemptQuestion = `-- name: CreateQuizAttemptQuestion :one
+
+INSERT INTO quiz_attempt_questions (
+    quiz_attempt_id, question_id, question_order
+) VALUES ($1, $2, $3)
+RETURNING id, quiz_attempt_id, question_id, question_order, created_at
+`
+
+type CreateQuizAttemptQuestionParams struct {
+	QuizAttemptID pgtype.UUID
+	QuestionID    pgtype.UUID
+	QuestionOrder int32
+}
+
+// Attempt question management
+func (q *Queries) CreateQuizAttemptQuestion(ctx context.Context, arg CreateQuizAttemptQuestionParams) (QuizAttemptQuestion, error) {
+	row := q.db.QueryRow(ctx, createQuizAttemptQuestion, arg.QuizAttemptID, arg.QuestionID, arg.QuestionOrder)
+	var i QuizAttemptQuestion
+	err := row.Scan(
+		&i.ID,
+		&i.QuizAttemptID,
+		&i.QuestionID,
+		&i.QuestionOrder,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -373,6 +425,126 @@ func (q *Queries) GetAnsweredQuestions(ctx context.Context, quizAttemptID pgtype
 	return items, nil
 }
 
+const getAttemptQuestionByOrder = `-- name: GetAttemptQuestionByOrder :one
+SELECT 
+    qaq.quiz_attempt_id,
+    qaq.question_order,
+    q.id AS question_id,
+    q.question_text,
+    q.question_type,
+    q.options,
+    q.correct_answer,
+    q.difficulty,
+    q.time_limit_seconds
+FROM quiz_attempt_questions qaq
+JOIN questions q ON q.id = qaq.question_id
+WHERE qaq.quiz_attempt_id = $1 AND qaq.question_order = $2
+`
+
+type GetAttemptQuestionByOrderParams struct {
+	QuizAttemptID pgtype.UUID
+	QuestionOrder int32
+}
+
+type GetAttemptQuestionByOrderRow struct {
+	QuizAttemptID    pgtype.UUID
+	QuestionOrder    int32
+	QuestionID       pgtype.UUID
+	QuestionText     string
+	QuestionType     QuestionType
+	Options          []byte
+	CorrectAnswer    pgtype.Text
+	Difficulty       QuestionDifficulty
+	TimeLimitSeconds pgtype.Int4
+}
+
+func (q *Queries) GetAttemptQuestionByOrder(ctx context.Context, arg GetAttemptQuestionByOrderParams) (GetAttemptQuestionByOrderRow, error) {
+	row := q.db.QueryRow(ctx, getAttemptQuestionByOrder, arg.QuizAttemptID, arg.QuestionOrder)
+	var i GetAttemptQuestionByOrderRow
+	err := row.Scan(
+		&i.QuizAttemptID,
+		&i.QuestionOrder,
+		&i.QuestionID,
+		&i.QuestionText,
+		&i.QuestionType,
+		&i.Options,
+		&i.CorrectAnswer,
+		&i.Difficulty,
+		&i.TimeLimitSeconds,
+	)
+	return i, err
+}
+
+const getExpectedNextQuestionOrder = `-- name: GetExpectedNextQuestionOrder :one
+SELECT COALESCE(MIN(qaq.question_order), 0)::int AS next_order
+FROM quiz_attempt_questions qaq
+WHERE qaq.quiz_attempt_id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM quiz_answers qa
+      WHERE qa.quiz_attempt_id = qaq.quiz_attempt_id
+        AND qa.question_id = qaq.question_id
+  )
+`
+
+func (q *Queries) GetExpectedNextQuestionOrder(ctx context.Context, quizAttemptID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, getExpectedNextQuestionOrder, quizAttemptID)
+	var next_order int32
+	err := row.Scan(&next_order)
+	return next_order, err
+}
+
+const getNextUnansweredAttemptQuestion = `-- name: GetNextUnansweredAttemptQuestion :one
+SELECT 
+    qaq.quiz_attempt_id,
+    qaq.question_order,
+    q.id AS question_id,
+    q.question_text,
+    q.question_type,
+    q.options,
+    q.correct_answer,
+    q.difficulty,
+    q.time_limit_seconds
+FROM quiz_attempt_questions qaq
+JOIN questions q ON q.id = qaq.question_id
+WHERE qaq.quiz_attempt_id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM quiz_answers qa
+      WHERE qa.quiz_attempt_id = qaq.quiz_attempt_id
+        AND qa.question_id = qaq.question_id
+  )
+ORDER BY qaq.question_order ASC
+LIMIT 1
+`
+
+type GetNextUnansweredAttemptQuestionRow struct {
+	QuizAttemptID    pgtype.UUID
+	QuestionOrder    int32
+	QuestionID       pgtype.UUID
+	QuestionText     string
+	QuestionType     QuestionType
+	Options          []byte
+	CorrectAnswer    pgtype.Text
+	Difficulty       QuestionDifficulty
+	TimeLimitSeconds pgtype.Int4
+}
+
+func (q *Queries) GetNextUnansweredAttemptQuestion(ctx context.Context, quizAttemptID pgtype.UUID) (GetNextUnansweredAttemptQuestionRow, error) {
+	row := q.db.QueryRow(ctx, getNextUnansweredAttemptQuestion, quizAttemptID)
+	var i GetNextUnansweredAttemptQuestionRow
+	err := row.Scan(
+		&i.QuizAttemptID,
+		&i.QuestionOrder,
+		&i.QuestionID,
+		&i.QuestionText,
+		&i.QuestionType,
+		&i.Options,
+		&i.CorrectAnswer,
+		&i.Difficulty,
+		&i.TimeLimitSeconds,
+	)
+	return i, err
+}
+
 const getQuizAnalytics = `-- name: GetQuizAnalytics :many
 SELECT 
     DATE(completed_at) as date,
@@ -489,6 +661,84 @@ func (q *Queries) GetQuizAttemptByID(ctx context.Context, id pgtype.UUID) (QuizA
 	return i, err
 }
 
+const getQuizAttemptQuestionByQuestionID = `-- name: GetQuizAttemptQuestionByQuestionID :one
+SELECT id, quiz_attempt_id, question_id, question_order, created_at FROM quiz_attempt_questions
+WHERE quiz_attempt_id = $1 AND question_id = $2
+`
+
+type GetQuizAttemptQuestionByQuestionIDParams struct {
+	QuizAttemptID pgtype.UUID
+	QuestionID    pgtype.UUID
+}
+
+func (q *Queries) GetQuizAttemptQuestionByQuestionID(ctx context.Context, arg GetQuizAttemptQuestionByQuestionIDParams) (QuizAttemptQuestion, error) {
+	row := q.db.QueryRow(ctx, getQuizAttemptQuestionByQuestionID, arg.QuizAttemptID, arg.QuestionID)
+	var i QuizAttemptQuestion
+	err := row.Scan(
+		&i.ID,
+		&i.QuizAttemptID,
+		&i.QuestionID,
+		&i.QuestionOrder,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getQuizAttemptQuestions = `-- name: GetQuizAttemptQuestions :many
+SELECT qaq.id, qaq.quiz_attempt_id, qaq.question_id, qaq.question_order, qaq.created_at,
+       q.question_text, q.question_type, q.difficulty, q.options, q.correct_answer, q.time_limit_seconds
+FROM quiz_attempt_questions qaq
+JOIN questions q ON q.id = qaq.question_id
+WHERE qaq.quiz_attempt_id = $1
+ORDER BY qaq.question_order ASC
+`
+
+type GetQuizAttemptQuestionsRow struct {
+	ID               pgtype.UUID
+	QuizAttemptID    pgtype.UUID
+	QuestionID       pgtype.UUID
+	QuestionOrder    int32
+	CreatedAt        pgtype.Timestamp
+	QuestionText     string
+	QuestionType     QuestionType
+	Difficulty       QuestionDifficulty
+	Options          []byte
+	CorrectAnswer    pgtype.Text
+	TimeLimitSeconds pgtype.Int4
+}
+
+func (q *Queries) GetQuizAttemptQuestions(ctx context.Context, quizAttemptID pgtype.UUID) ([]GetQuizAttemptQuestionsRow, error) {
+	rows, err := q.db.Query(ctx, getQuizAttemptQuestions, quizAttemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetQuizAttemptQuestionsRow
+	for rows.Next() {
+		var i GetQuizAttemptQuestionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.QuizAttemptID,
+			&i.QuestionID,
+			&i.QuestionOrder,
+			&i.CreatedAt,
+			&i.QuestionText,
+			&i.QuestionType,
+			&i.Difficulty,
+			&i.Options,
+			&i.CorrectAnswer,
+			&i.TimeLimitSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getQuizResults = `-- name: GetQuizResults :one
 SELECT id, quiz_attempt_id, easy_correct, easy_total, medium_correct, medium_total, hard_correct, hard_total, expert_correct, expert_total, multiple_choice_correct, multiple_choice_total, coding_correct, coding_total, avg_time_per_question_seconds, fastest_question_time_seconds, slowest_question_time_seconds, ai_feedback, strengths, weaknesses, created_at FROM quiz_results
 WHERE quiz_attempt_id = $1
@@ -528,7 +778,7 @@ SELECT
     qa.id, qa.quiz_attempt_id, qa.question_id, qa.user_answer, qa.is_correct, qa.last_saved_at, qa.save_count, qa.time_spent_seconds, qa.code_output, qa.execution_time_ms, qa.memory_used_mb, qa.is_skipped, qa.is_reviewed, qa.created_at, qa.updated_at
 FROM quiz_answers qa
 JOIN quiz_attempts qat ON qa.quiz_attempt_id = qat.id
-WHERE qat.user_id = $1
+WHERE qat.user_id = $1 AND qat.status = 'completed'
 ORDER BY qa.created_at DESC
 `
 
@@ -741,7 +991,14 @@ JOIN users u ON qa.user_id = u.id
 LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
 WHERE qa.job_id = $1
 ORDER BY qa.completed_at DESC NULLS LAST
+LIMIT $2 OFFSET $3
 `
+
+type ListQuizAttemptsByJobParams struct {
+	JobID  pgtype.UUID
+	Limit  int32
+	Offset int32
+}
 
 type ListQuizAttemptsByJobRow struct {
 	QuizID           pgtype.UUID
@@ -767,8 +1024,8 @@ type ListQuizAttemptsByJobRow struct {
 
 // List all quiz attempts for a job (admin view), including applicant info
 // and optional AI quiz results
-func (q *Queries) ListQuizAttemptsByJob(ctx context.Context, jobID pgtype.UUID) ([]ListQuizAttemptsByJobRow, error) {
-	rows, err := q.db.Query(ctx, listQuizAttemptsByJob, jobID)
+func (q *Queries) ListQuizAttemptsByJob(ctx context.Context, arg ListQuizAttemptsByJobParams) ([]ListQuizAttemptsByJobRow, error) {
+	rows, err := q.db.Query(ctx, listQuizAttemptsByJob, arg.JobID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -839,7 +1096,14 @@ JOIN jobs j ON qa.job_id = j.id
 LEFT JOIN quiz_results qr ON qa.id = qr.quiz_attempt_id
 WHERE qa.user_id = $1
 ORDER BY qa.completed_at DESC NULLS LAST
+LIMIT $2 OFFSET $3
 `
+
+type ListQuizAttemptsByUserParams struct {
+	UserID pgtype.UUID
+	Limit  int32
+	Offset int32
+}
 
 type ListQuizAttemptsByUserRow struct {
 	QuizID           pgtype.UUID
@@ -868,8 +1132,8 @@ type ListQuizAttemptsByUserRow struct {
 
 // List all quiz attempts for a user (admin view), across all jobs,
 // including job info, applicant info and optional AI quiz results
-func (q *Queries) ListQuizAttemptsByUser(ctx context.Context, userID pgtype.UUID) ([]ListQuizAttemptsByUserRow, error) {
-	rows, err := q.db.Query(ctx, listQuizAttemptsByUser, userID)
+func (q *Queries) ListQuizAttemptsByUser(ctx context.Context, arg ListQuizAttemptsByUserParams) ([]ListQuizAttemptsByUserRow, error) {
+	rows, err := q.db.Query(ctx, listQuizAttemptsByUser, arg.UserID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

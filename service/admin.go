@@ -2,19 +2,24 @@ package service
 
 import (
 	"context"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/Izone-hub/talent-backend/database"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AdminService struct {
 	queries *database.Queries
+	db      database.DBTX
 }
 
 func NewAdminService(db database.DBTX) *AdminService {
 	return &AdminService{
 		queries: database.New(db),
+		db:      db,
 	}
 }
 
@@ -27,6 +32,21 @@ type DashboardStats struct {
 	NewApplicationsToday int32 `json:"new_applications_today"`
 }
 
+type TrendPoint struct {
+	Date  string `json:"date"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+	Total int    `json:"total"`
+}
+
+type StatusDistributionItem struct {
+	Status     string  `json:"status"`
+	Label      string  `json:"label"`
+	Count      int     `json:"count"`
+	Percentage float64 `json:"percentage"`
+	Color      string  `json:"color"`
+}
+
 // RecentActivityPagination contains pagination info for recent activity.
 type RecentActivityPagination struct {
 	Limit   int32 `json:"limit"`
@@ -36,9 +56,12 @@ type RecentActivityPagination struct {
 }
 
 // DashboardResponse is the combined response for the admin dashboard endpoint.
-// It contains both statistics and recent activity in a single response.
+// It contains both statistics, analytics charts, and recent activity.
 type DashboardResponse struct {
 	Stats                    DashboardStats            `json:"stats"`
+	ApplicationsTrend        []TrendPoint              `json:"applications_trend"`
+	UsersTrend               []TrendPoint              `json:"users_trend"`
+	StatusDistribution       []StatusDistributionItem  `json:"status_distribution"`
 	RecentActivity           []RecentActivityItem      `json:"recent_activity"`
 	RecentActivityPagination *RecentActivityPagination `json:"recent_activity_pagination,omitempty"`
 }
@@ -51,10 +74,220 @@ type RecentActivityItem struct {
 	JobTitle       string  `json:"job_title"`
 }
 
+type ContactRequestResponse struct {
+	ID             uuid.UUID `json:"id"`
+	FirstName      string    `json:"first_name"`
+	LastName       string    `json:"last_name"`
+	Email          string    `json:"email"`
+	Company        string    `json:"company"`
+	BudgetRange    string    `json:"budget_range"`
+	ProjectDetails string    `json:"project_details"`
+	Status         string    `json:"status"`
+	CreatedAt      string    `json:"created_at"`
+}
+
+type ContactRequestsPage struct {
+	Items      []ContactRequestResponse `json:"items"`
+	Pagination struct {
+		Limit   int32 `json:"limit"`
+		Offset  int32 `json:"offset"`
+		Total   int64 `json:"total"`
+		HasMore bool  `json:"has_more"`
+	} `json:"pagination"`
+}
+
+func contactRequestResponse(row database.ContactRequest) ContactRequestResponse {
+	return ContactRequestResponse{
+		ID:             uuid.UUID(row.ID.Bytes),
+		FirstName:      row.FirstName,
+		LastName:       row.LastName,
+		Email:          row.Email,
+		Company:        row.Company.String,
+		BudgetRange:    row.BudgetRange.String,
+		ProjectDetails: row.ProjectDetails,
+		Status:         row.Status,
+		CreatedAt:      row.CreatedAt.Time.Format(time.RFC3339),
+	}
+}
+
+func (s *AdminService) ListContactRequests(ctx context.Context, limit, offset int32) (*ContactRequestsPage, error) {
+	rows, err := s.queries.ListContactRequests(ctx, database.ListContactRequestsParams{Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, err
+	}
+	total, err := s.queries.CountContactRequests(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ContactRequestResponse, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, contactRequestResponse(row))
+	}
+	return &ContactRequestsPage{
+		Items: items,
+		Pagination: struct {
+			Limit   int32 `json:"limit"`
+			Offset  int32 `json:"offset"`
+			Total   int64 `json:"total"`
+			HasMore bool  `json:"has_more"`
+		}{Limit: limit, Offset: offset, Total: total, HasMore: int64(offset+limit) < total},
+	}, nil
+}
+
+func (s *AdminService) GetContactRequest(ctx context.Context, id uuid.UUID) (*ContactRequestResponse, error) {
+	row, err := s.queries.GetContactRequest(ctx, pgUUID(id))
+	if err != nil {
+		return nil, err
+	}
+	response := contactRequestResponse(row)
+	return &response, nil
+}
+
+func (s *AdminService) ListContactRequestsByEmail(ctx context.Context, email string) ([]ContactRequestResponse, error) {
+	rows, err := s.queries.ListContactRequestsByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ContactRequestResponse, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, contactRequestResponse(row))
+	}
+	return items, nil
+}
+
+func (s *AdminService) UpdateContactRequestStatus(ctx context.Context, id uuid.UUID, status string) (*ContactRequestResponse, error) {
+	row, err := s.queries.UpdateContactRequestStatus(ctx, database.UpdateContactRequestStatusParams{ID: pgUUID(id), Status: status})
+	if err != nil {
+		return nil, err
+	}
+	response := contactRequestResponse(row)
+	return &response, nil
+}
+
+func (s *AdminService) DeleteContactRequest(ctx context.Context, id uuid.UUID) error {
+	return s.queries.DeleteContactRequest(ctx, pgUUID(id))
+}
+
+func pgUUID(id uuid.UUID) pgtype.UUID {
+	var value pgtype.UUID
+	copy(value.Bytes[:], id[:])
+	value.Valid = true
+	return value
+}
+
 func (s *AdminService) GetDashboard(ctx context.Context) (*DashboardResponse, error) {
 	stats, err := s.queries.GetDashboardStats(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	// 1. Applications Trend (Daily for last 30 days)
+	appTrend := make([]TrendPoint, 0, 30)
+	if s.db != nil {
+		if appRows, err := s.db.Query(ctx, `
+			SELECT 
+				TO_CHAR(d::date, 'YYYY-MM-DD') AS date,
+				TO_CHAR(d::date, 'Mon DD') AS label,
+				COUNT(ja.id)::int AS count
+			FROM generate_series(
+				CURRENT_DATE - INTERVAL '29 days',
+				CURRENT_DATE,
+				INTERVAL '1 day'
+			) d
+			LEFT JOIN job_applications ja ON ja.submitted_at::date = d::date AND ja.status != 'draft'
+			GROUP BY d::date
+			ORDER BY d::date ASC;
+		`); err == nil {
+			runningAppTotal := 0
+			for appRows.Next() {
+				var p TrendPoint
+				if scanErr := appRows.Scan(&p.Date, &p.Label, &p.Count); scanErr == nil {
+					runningAppTotal += p.Count
+					p.Total = runningAppTotal
+					appTrend = append(appTrend, p)
+				}
+			}
+			appRows.Close()
+		}
+	}
+
+	// 2. Users Trend (Monthly for last 8 months with cumulative growth)
+	userTrend := make([]TrendPoint, 0, 8)
+	if s.db != nil {
+		if userRows, err := s.db.Query(ctx, `
+			SELECT 
+				TO_CHAR(d::date, 'YYYY-MM') AS date,
+				TO_CHAR(d::date, 'Mon YYYY') AS label,
+				COUNT(u.id)::int AS count
+			FROM generate_series(
+				DATE_TRUNC('month', CURRENT_DATE - INTERVAL '7 months'),
+				DATE_TRUNC('month', CURRENT_DATE),
+				INTERVAL '1 month'
+			) d
+			LEFT JOIN users u ON DATE_TRUNC('month', u.created_at) = d::date
+			GROUP BY d::date
+			ORDER BY d::date ASC;
+		`); err == nil {
+			runningUserTotal := 0
+			for userRows.Next() {
+				var p TrendPoint
+				if scanErr := userRows.Scan(&p.Date, &p.Label, &p.Count); scanErr == nil {
+					runningUserTotal += p.Count
+					p.Total = runningUserTotal
+					userTrend = append(userTrend, p)
+				}
+			}
+			userRows.Close()
+		}
+	}
+
+	// 3. Application Status Distribution
+	statusColors := map[string]struct{ label, color string }{
+		"submitted":      {"Submitted", "#3b82f6"},
+		"quiz_started":   {"Quiz Started", "#6366f1"},
+		"quiz_completed": {"Quiz Completed", "#8b5cf6"},
+		"under_review":   {"Under Review", "#f59e0b"},
+		"shortlisted":    {"Shortlisted", "#06b6d4"},
+		"interviewed":    {"Interviewed", "#14b8a6"},
+		"accepted":       {"Accepted", "#10b981"},
+		"rejected":       {"Rejected", "#ef4444"},
+		"withdrawn":      {"Withdrawn", "#64748b"},
+	}
+
+	distItems := make([]StatusDistributionItem, 0)
+	totalApps := 0
+	if s.db != nil {
+		if distRows, err := s.db.Query(ctx, `
+			SELECT status, COUNT(*)::int AS count
+			FROM job_applications
+			WHERE status != 'draft'
+			GROUP BY status
+			ORDER BY count DESC;
+		`); err == nil {
+			for distRows.Next() {
+				var status string
+				var count int
+				if scanErr := distRows.Scan(&status, &count); scanErr == nil {
+					totalApps += count
+					meta, ok := statusColors[status]
+					if !ok {
+						meta = struct{ label, color string }{strings.ReplaceAll(status, "_", " "), "#94a3b8"}
+					}
+					distItems = append(distItems, StatusDistributionItem{
+						Status: status,
+						Label:  meta.label,
+						Count:  count,
+						Color:  meta.color,
+					})
+				}
+			}
+			distRows.Close()
+		}
+	}
+	for i := range distItems {
+		if totalApps > 0 {
+			distItems[i].Percentage = math.Round((float64(distItems[i].Count)/float64(totalApps))*1000) / 10
+		}
 	}
 
 	// Fetch first page of recent activity (10 items)
@@ -81,7 +314,10 @@ func (s *AdminService) GetDashboard(ctx context.Context) (*DashboardResponse, er
 			NewUsersToday:        stats.NewUsersToday,
 			NewApplicationsToday: stats.NewApplicationsToday,
 		},
-		RecentActivity: activity,
+		ApplicationsTrend:        appTrend,
+		UsersTrend:               userTrend,
+		StatusDistribution:       distItems,
+		RecentActivity:           activity,
 		RecentActivityPagination: &RecentActivityPagination{
 			Limit:   defaultLimit,
 			Offset:  0,
@@ -135,30 +371,23 @@ func (s *AdminService) UpdateCompanySettings(ctx context.Context, settings Compa
 // It carries the same fields as models.User but omits sensitive data
 // (GitHub access token / token expiry) from the JSON response.
 type AdminUser struct {
-	ID                   uuid.UUID  `json:"id"`
-	GithubID             int64      `json:"github_id"`
-	GithubUsername       string     `json:"github_username"`
-	Email                *string    `json:"email,omitempty"`
-	AvatarURL            *string    `json:"avatar_url,omitempty"`
-	Name                 *string    `json:"name,omitempty"`
-	Role                 string     `json:"role"`
-	LastLoginAt          *string    `json:"last_login_at,omitempty"`
-	CreatedAt            *string    `json:"created_at,omitempty"`
-	UpdatedAt            *string    `json:"updated_at,omitempty"`
-	PublicRepos          int        `json:"public_repos"`
-	PublicGists          int        `json:"public_gists"`
-	Followers            int        `json:"followers"`
-	Following            int        `json:"following"`
-	Hireable             bool       `json:"hireable"`
-	Blog                 *string    `json:"blog,omitempty"`
-	Company              *string    `json:"company,omitempty"`
-	Location             *string    `json:"location,omitempty"`
-	Bio                  *string    `json:"bio,omitempty"`
-	TwitterUsername      *string    `json:"twitter_username,omitempty"`
-	TopLanguages         []string   `json:"top_languages"`
-	ContributionCount    int        `json:"contribution_count"`
-	AcceptanceJobID      *uuid.UUID `json:"acceptance_job_id,omitempty"`
-	Categories           []string   `json:"categories"`
+	ID                uuid.UUID  `json:"id"`
+	GithubID          int64      `json:"github_id"`
+	GithubUsername    string     `json:"github_username"`
+	Email             *string    `json:"email,omitempty"`
+	AvatarURL         *string    `json:"avatar_url,omitempty"`
+	Name              *string    `json:"name,omitempty"`
+	Role            string     `json:"role"`
+	LastLoginAt     *string    `json:"last_login_at,omitempty"`
+	CreatedAt       *string    `json:"created_at,omitempty"`
+	UpdatedAt       *string    `json:"updated_at,omitempty"`
+	PublicRepos     int        `json:"public_repos"`
+	Followers       int        `json:"followers"`
+	Following       int        `json:"following"`
+	Bio             *string    `json:"bio,omitempty"`
+	TopLanguages    []string   `json:"top_languages"`
+	AcceptanceJobID *uuid.UUID `json:"acceptance_job_id,omitempty"`
+	Categories      []string   `json:"categories"`
 }
 
 // ListAllUsers returns a paginated list of registered users, newest first,
@@ -210,30 +439,23 @@ func adminUserFromDB(r database.User) AdminUser {
 		categories = []string{}
 	}
 	return AdminUser{
-		ID:                pgUUIDToUUID(r.ID),
-		GithubID:          r.GithubID,
-		GithubUsername:    r.GithubUsername,
-		Email:             pgTextToStrPtr(r.Email),
-		AvatarURL:         pgTextToStrPtr(r.AvatarUrl),
-		Name:              pgTextToStrPtr(r.Name),
-		Role:              r.Role,
-		LastLoginAt:       pgTimestampToTimePtrStr(r.LastLoginAt),
-		CreatedAt:         pgTimestampToTimePtrStr(r.CreatedAt),
-		UpdatedAt:         pgTimestampToTimePtrStr(r.UpdatedAt),
-		PublicRepos:       int(r.PublicRepos.Int32),
-		PublicGists:       int(r.PublicGists.Int32),
-		Followers:         int(r.Followers.Int32),
-		Following:         int(r.Following.Int32),
-		Hireable:          r.Hireable.Bool,
-		Blog:              pgTextToStrPtr(r.Blog),
-		Company:           pgTextToStrPtr(r.Company),
-		Location:          pgTextToStrPtr(r.Location),
-		Bio:               pgTextToStrPtr(r.Bio),
-		TwitterUsername:   pgTextToStrPtr(r.TwitterUsername),
-		TopLanguages:      r.TopLanguages,
-		ContributionCount: int(r.ContributionCount.Int32),
-		AcceptanceJobID:   pgUUIDToUUIDPtr(r.AcceptanceJobID),
-		Categories:        categories,
+		ID:              pgUUIDToUUID(r.ID),
+		GithubID:        r.GithubID,
+		GithubUsername:  r.GithubUsername,
+		Email:           pgTextToStrPtr(r.Email),
+		AvatarURL:       pgTextToStrPtr(r.AvatarUrl),
+		Name:            pgTextToStrPtr(r.Name),
+		Role:            r.Role,
+		LastLoginAt:     pgTimestampToTimePtrStr(r.LastLoginAt),
+		CreatedAt:       pgTimestampToTimePtrStr(r.CreatedAt),
+		UpdatedAt:       pgTimestampToTimePtrStr(r.UpdatedAt),
+		PublicRepos:     int(r.PublicRepos.Int32),
+		Followers:       int(r.Followers.Int32),
+		Following:       int(r.Following.Int32),
+		Bio:             pgTextToStrPtr(r.Bio),
+		TopLanguages:    r.TopLanguages,
+		AcceptanceJobID: pgUUIDToUUIDPtr(r.AcceptanceJobID),
+		Categories:      categories,
 	}
 }
 
@@ -395,14 +617,16 @@ type OverviewJob struct {
 }
 
 type QuizCompletedCandidate struct {
-	ApplicationID  uuid.UUID `json:"application_id"`
-	JobID          uuid.UUID `json:"job_id"`
-	QuizScore      *int      `json:"quiz_score"`
-	ApplicantName  string    `json:"applicant_name"`
-	ApplicantEmail string    `json:"applicant_email"`
-	GithubUsername string    `json:"applicant_github_username"`
-	AvatarURL      *string   `json:"applicant_avatar_url"`
-	JobTitle       string    `json:"job_title"`
+	ApplicationID            uuid.UUID `json:"application_id"`
+	JobID                    uuid.UUID `json:"job_id"`
+	QuizScore                *int      `json:"quiz_score"`
+	ApplicantName            string    `json:"applicant_name"`
+	ApplicantEmail           string    `json:"applicant_email"`
+	GithubUsername           string    `json:"applicant_github_username"`
+	AvatarURL                *string   `json:"applicant_avatar_url"`
+	JobTitle                 string    `json:"job_title"`
+	CandidateFeedbackRating  string    `json:"candidate_feedback_rating,omitempty"`
+	CandidateFeedbackComment string    `json:"candidate_feedback_comment,omitempty"`
 }
 
 type AdminApplicationsOverview struct {
@@ -475,14 +699,16 @@ func (s *AdminService) GetApplicationsOverview(ctx context.Context, quizCandidat
 			score = &s
 		}
 		candidateModels = append(candidateModels, QuizCompletedCandidate{
-			ApplicationID:  pgUUIDToUUID(c.ApplicationID),
-			JobID:          pgUUIDToUUID(c.JobID),
-			QuizScore:      score,
-			ApplicantName:  c.ApplicantName,
-			ApplicantEmail: c.ApplicantEmail,
-			GithubUsername: c.ApplicantGithubUsername,
-			AvatarURL:      emptyStrToNil(c.ApplicantAvatarUrl),
-			JobTitle:       c.JobTitle,
+			ApplicationID:            pgUUIDToUUID(c.ApplicationID),
+			JobID:                    pgUUIDToUUID(c.JobID),
+			QuizScore:                score,
+			ApplicantName:            c.ApplicantName,
+			ApplicantEmail:           c.ApplicantEmail,
+			GithubUsername:           c.ApplicantGithubUsername,
+			AvatarURL:                emptyStrToNil(c.ApplicantAvatarUrl),
+			JobTitle:                 c.JobTitle,
+			CandidateFeedbackRating:  c.CandidateFeedbackRating,
+			CandidateFeedbackComment: c.CandidateFeedbackComment,
 		})
 	}
 

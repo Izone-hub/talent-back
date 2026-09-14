@@ -16,17 +16,27 @@ func NewRouter(
 	cvController *controller.CvController,
 	tagController *controller.TagController,
 	questionController *controller.QuestionController,
+	questionFeedbackController *controller.QuestionFeedbackController,
 	quizController *controller.QuizController,
+	quizResultFeedbackController *controller.QuizResultFeedbackController,
+	quizAnswerFeedbackController *controller.QuizAnswerFeedbackController,
 	appController *controller.ApplicationController,
 	sandboxController *controller.SandboxController,
 	intelligenceController *controller.IntelligenceController,
 	savedJobController *controller.SavedJobController,
 	adminController *controller.AdminController,
 	surveyQuestionController *controller.SurveyQuestionController,
+	healthController *controller.HealthController,
 	authMiddleware *middleware.AuthMiddleware,
 ) http.Handler {
 
 	mux := http.NewServeMux()
+
+	// -----------------------------------------------------------------------
+	// Health check endpoints (for Docker / Kubernetes / load balancer probes)
+	// -----------------------------------------------------------------------
+	mux.HandleFunc("GET /healthz", healthController.CheckHealth)
+	mux.HandleFunc("GET /health", healthController.CheckHealth)
 
 	// Root path handler to check API status and avoid 404
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -73,13 +83,17 @@ func NewRouter(
 		cvController,
 		tagController,
 		questionController,
+		questionFeedbackController,
 		quizController,
+		quizResultFeedbackController,
+		quizAnswerFeedbackController,
 		appController,
 		sandboxController,
 		intelligenceController,
 		savedJobController,
 		adminController,
 		surveyQuestionController,
+		healthController,
 		authMiddleware,
 	)
 
