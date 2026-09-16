@@ -21,9 +21,6 @@ type AdminController struct {
 }
 
 func NewAdminController(adminService *service.AdminService, analyzerURL, internalToken string) *AdminController {
-	if analyzerURL == "" {
-		analyzerURL = "http://localhost:8000"
-	}
 	return &AdminController{
 		adminService:  adminService,
 		analyzerURL:   strings.TrimSuffix(analyzerURL, "/"),

@@ -22,9 +22,6 @@ type ApplicationController struct {
 }
 
 func NewApplicationController(appService *service.ApplicationService, cvService *service.CvService, feedbackService *service.QuizResultFeedbackService, analyzerURL, internalToken string) *ApplicationController {
-	if analyzerURL == "" {
-		analyzerURL = "http://localhost:8000"
-	}
 	return &ApplicationController{
 		appService:      appService,
 		cvService:       cvService,

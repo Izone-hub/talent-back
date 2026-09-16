@@ -53,6 +53,17 @@ func main() {
 		log.Println("Successfully migrated any 'pending' application statuses to 'submitted'")
 	}
 
+	// Ensure quiz_attempt_questions.started_at exists for backend-authoritative question timers
+	_, err = db.Exec(
+		context.Background(),
+		"ALTER TABLE quiz_attempt_questions ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;",
+	)
+	if err != nil {
+		log.Printf("Failed to ensure quiz_attempt_questions.started_at column exists: %v", err)
+	} else {
+		log.Println("Successfully ensured quiz_attempt_questions.started_at column exists")
+	}
+
 	// Ensure all tags in questions are populated in tags table
 	_, err = db.Exec(context.Background(), `
 		INSERT INTO tags (name, category, description, color)
@@ -246,10 +257,10 @@ func main() {
 
 	// Wrap handler with logging and CORS middleware
 	handler = middleware.RequestLogger(handler)
-	corsHandler := middleware.CORSMiddleware(handler)
+	corsHandler := middleware.CORSMiddleware(handler, cfg.CORSAllowedOrigins)
 
 	// Start server
-	serverAddr := ":5000"
+	serverAddr := ":" + cfg.Port
 	log.Printf("Server starting on %s", serverAddr)
 
 	if err := http.ListenAndServe(serverAddr, corsHandler); err != nil {
