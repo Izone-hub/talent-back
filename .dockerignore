@@ -1,0 +1,9 @@
+vendor/
+server
+talent-backend
+.git
+.gitignore
+.env
+*.log
+uploads/
+node_modules/
