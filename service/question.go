@@ -37,11 +37,14 @@ func (s *QuestionService) CreateQuestion(ctx context.Context, userID uuid.UUID, 
 		return nil, fmt.Errorf("validation error: %w", err)
 	}
 
+	qType := database.QuestionType(strings.ToLower(string(req.QuestionType)))
+	difficulty := database.QuestionDifficulty(strings.ToLower(string(req.Difficulty)))
+
 	// 1. Create the base question
 	dbQuestion, err := s.queries.CreateQuestion(ctx, database.CreateQuestionParams{
 		QuestionText:     req.QuestionText,
-		QuestionType:     database.QuestionType(req.QuestionType),
-		Difficulty:       database.QuestionDifficulty(req.Difficulty),
+		QuestionType:     qType,
+		Difficulty:       difficulty,
 		Options:          req.Options,
 		CorrectAnswer:    strPtrToPgText(req.CorrectAnswer),
 		Explanation:      strPtrToPgText(req.Explanation),
@@ -64,7 +67,7 @@ func (s *QuestionService) CreateQuestion(ctx context.Context, userID uuid.UUID, 
 	}
 
 	// 3. If it's a coding challenge, create coding details
-	if req.QuestionType == models.QuestionTypeCodingChallenge && req.CodingDetails != nil {
+	if qType == database.QuestionTypeCodingChallenge && req.CodingDetails != nil {
 		dbCoding, err := s.queries.CreateCodingQuestion(ctx, database.CreateCodingQuestionParams{
 			QuestionID:         dbQuestion.ID,
 			Language:           req.CodingDetails.Language,
@@ -80,9 +83,10 @@ func (s *QuestionService) CreateQuestion(ctx context.Context, userID uuid.UUID, 
 		res.CodingDetails = &codingModel
 	}
 
-	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditAction("question_created"), "question", pgUUIDToUUID(dbQuestion.ID), map[string]any{
-		"difficulty":    req.Difficulty,
-		"question_type": req.QuestionType,
+	if err := createAuditLogEntry(ctx, s.queries, userID, "admin", database.AuditActionAdminAction, "question", pgUUIDToUUID(dbQuestion.ID), map[string]any{
+		"action":        "question_created",
+		"difficulty":    difficulty,
+		"question_type": qType,
 	}, nil, res.Question); err != nil {
 		return nil, fmt.Errorf("failed to record question audit log: %w", err)
 	}
@@ -218,12 +222,12 @@ func (s *QuestionService) UpdateQuestion(ctx context.Context, userID, id uuid.UU
 		res.CodingDetails = &codingModel
 	}
 
-	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditAction("question_updated"), "question", id, map[string]any{
+	if err := createAuditLogEntry(ctx, s.queries, userID, "admin", database.AuditActionAdminAction, "question", id, map[string]any{
+		"action":         "question_updated",
 		"updated_fields": req,
 	}, oldQuestion, res.Question); err != nil {
 		return nil, fmt.Errorf("failed to record question update audit log: %w", err)
 	}
-
 	return res, nil
 }
 
@@ -277,7 +281,7 @@ func (s *QuestionService) DeleteQuestion(ctx context.Context, userID, id uuid.UU
 	if err := s.queries.DeleteQuestion(ctx, uuidToPgUUID(id)); err != nil {
 		return err
 	}
-	if err := createAuditLogEntry(ctx, s.queries, userID, "", database.AuditAction("question_deleted"), "question", id, nil, nil, map[string]any{"id": id.String()}); err != nil {
+	if err := createAuditLogEntry(ctx, s.queries, userID, "admin", database.AuditActionAdminAction, "question", id, map[string]any{"action": "question_deleted", "id": id.String()}, nil, map[string]any{"id": id.String()}); err != nil {
 		return err
 	}
 	return nil

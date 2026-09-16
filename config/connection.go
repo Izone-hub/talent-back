@@ -94,6 +94,7 @@ func LoadConfig(path string) (config Config, err error) {
 	viper.SetDefault("HOST_ADDRESS", "localhost")
 	viper.SetDefault("HOST_PORT", "5432")
 	viper.SetDefault("DB_SSLMODE", "disable")
+	viper.SetDefault("ANALYZER_URL", "http://analyzer:8000")
 	viper.SetDefault("FRONTEND_URL", "http://localhost:5173")
 	viper.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
 	viper.SetDefault("ENVIRONMENT", "development")

@@ -21,9 +21,6 @@ type AnalyzerClient struct {
 
 // NewAnalyzerClient creates a shared AnalyzerClient with strict timeout and connection pooling.
 func NewAnalyzerClient(baseURL, internalToken string) *AnalyzerClient {
-	if baseURL == "" {
-		baseURL = "http://localhost:8000"
-	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	baseURL = strings.TrimSuffix(baseURL, "/analyze-cv")
 	baseURL = strings.TrimSuffix(baseURL, "/")
