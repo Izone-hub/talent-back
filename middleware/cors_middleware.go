@@ -2,31 +2,18 @@ package middleware
 
 import (
 	"net/http"
-	"os"
 	"strings"
 )
 
-// Default allowed origins for development
-var defaultAllowedOrigins = []string{
-	"http://localhost:5173",
-	"http://localhost:3000",
-	"http://localhost:5000",
-}
-
 // CORSMiddleware handles Cross-Origin Resource Sharing (CORS) with an explicit allowlist.
 // It strictly forbids arbitrary origin reflection and wildcard credentials.
-func CORSMiddleware(next http.Handler) http.Handler {
+func CORSMiddleware(next http.Handler, allowedOriginsCSV string) http.Handler {
 	allowedMap := make(map[string]bool)
-	for _, o := range defaultAllowedOrigins {
-		allowedMap[o] = true
-	}
 
-	// Read additional allowed origins from environment (comma-separated)
-	if envOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); envOrigins != "" {
-		for _, o := range strings.Split(envOrigins, ",") {
-			if trimmed := strings.TrimSpace(o); trimmed != "" {
-				allowedMap[trimmed] = true
-			}
+	// Parse comma-separated allowed origins (from config/env)
+	for _, o := range strings.Split(allowedOriginsCSV, ",") {
+		if trimmed := strings.TrimSpace(o); trimmed != "" {
+			allowedMap[trimmed] = true
 		}
 	}
 

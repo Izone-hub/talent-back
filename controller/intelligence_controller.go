@@ -29,9 +29,6 @@ type IntelligenceController struct {
 }
 
 func NewIntelligenceController(githubService *service.GithubService, db database.DBTX, analyzerURL, internalToken string) *IntelligenceController {
-	if analyzerURL == "" {
-		analyzerURL = "http://localhost:8000"
-	}
 	return &IntelligenceController{
 		githubService: githubService,
 		queries:       database.New(db),

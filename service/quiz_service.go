@@ -708,10 +708,57 @@ func (s *QuizService) selectQuizQuestions(ctx context.Context, jobID uuid.UUID) 
 
 	hasTags := len(jobTags) > 0
 
+	// 2. Guarantee 1 coding challenge question if available in the question bank
+	var codingID uuid.UUID
+	var codingDiff string
+	codingFound := false
+
+	if hasTags {
+		err := s.pool.QueryRow(ctx, `
+			SELECT q.id, q.difficulty::text FROM questions q
+			WHERE q.is_active = true
+			  AND q.question_type = 'coding_challenge'
+			  AND EXISTS (
+			      SELECT 1 FROM coding_questions cq WHERE cq.question_id = q.id
+			  )
+			  AND EXISTS (
+			      SELECT 1 FROM unnest(q.tags) qt WHERE LOWER(qt) = ANY($1::text[])
+			  )
+			ORDER BY RANDOM()
+			LIMIT 1
+		`, jobTags).Scan(&codingID, &codingDiff)
+		if err == nil {
+			codingFound = true
+		}
+	}
+
+	if !codingFound {
+		// Fallback: any active coding challenge question in the question bank
+		err := s.pool.QueryRow(ctx, `
+			SELECT q.id, q.difficulty::text FROM questions q
+			WHERE q.is_active = true
+			  AND q.question_type = 'coding_challenge'
+			  AND EXISTS (
+			      SELECT 1 FROM coding_questions cq WHERE cq.question_id = q.id
+			  )
+			ORDER BY RANDOM()
+			LIMIT 1
+		`).Scan(&codingID, &codingDiff)
+		if err == nil {
+			codingFound = true
+		}
+	}
+
+	if codingFound {
+		selectedSet[codingID] = true
+		selectedIDs = append(selectedIDs, codingID)
+		selectedByDiff[codingDiff]++
+	}
+
 	if hasTags {
 		// TIER 1: Tag + requested difficulty
 		for _, dt := range difficultyTargets {
-			needed := dt.count
+			needed := dt.count - selectedByDiff[dt.difficulty]
 			if needed <= 0 || len(selectedIDs) >= totalTarget {
 				continue
 			}
@@ -861,7 +908,7 @@ func (s *QuizService) selectQuizQuestions(ctx context.Context, jobID uuid.UUID) 
 		// Job has NO tags: tag restriction is omitted
 		// Select by requested difficulty (3 easy, 3 medium, 3 hard, 1 expert)
 		for _, dt := range difficultyTargets {
-			needed := dt.count
+			needed := dt.count - selectedByDiff[dt.difficulty]
 			if needed <= 0 || len(selectedIDs) >= totalTarget {
 				continue
 			}
@@ -1406,8 +1453,8 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	// If the attempt has not been started yet (status == 'started'), return ready message so frontend shows the Start Quiz screen
 	if status == "started" {
 		return map[string]interface{}{
-			"status":              "finished",
-			"message":             "No more questions available or quiz completed",
+			"status":              "ready",
+			"message":             "Quiz is ready to start",
 			"attempt_id":          attemptID,
 			"question_number":     0,
 			"total_questions":     limitCount,
@@ -1486,6 +1533,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		difficulty       string
 		options          *string
 		timeLimitSeconds int
+		qaqStartedAt     pgtype.Timestamp
 	)
 	err = s.pool.QueryRow(ctx, `
 		SELECT 
@@ -1495,7 +1543,8 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 			q.question_type::text,
 			q.options::text,
 			q.difficulty::text,
-			q.time_limit_seconds
+			q.time_limit_seconds,
+			qaq.started_at
 		FROM quiz_attempt_questions qaq
 		JOIN questions q ON q.id = qaq.question_id
 		WHERE qaq.quiz_attempt_id = $1
@@ -1506,7 +1555,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		  )
 		ORDER BY qaq.question_order ASC
 		LIMIT 1
-	`, attemptUUID).Scan(&questionOrder, &id, &qText, &qType, &options, &difficulty, &timeLimitSeconds)
+	`, attemptUUID).Scan(&questionOrder, &id, &qText, &qType, &options, &difficulty, &timeLimitSeconds, &qaqStartedAt)
 	if err != nil {
 		if strings.Contains(err.Error(), "no rows") {
 			return map[string]interface{}{
@@ -1524,6 +1573,49 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		}
 		log.Printf("GetNextQuestion query error for attempt %s: %v", attemptID, err)
 		return nil, fmt.Errorf("failed to retrieve next question: %w", err)
+	}
+
+	// Backend-authoritative question timer:
+	// If the question has never been started, record started_at = NOW() (in UTC).
+	// If it was already started, calculate remaining time based on started_at.
+	now := time.Now().UTC()
+	var qStartTime time.Time
+	if !qaqStartedAt.Valid {
+		_ = s.pool.QueryRow(ctx, `
+			UPDATE quiz_attempt_questions
+			SET started_at = $1
+			WHERE quiz_attempt_id = $2 AND question_id = $3 AND started_at IS NULL
+			RETURNING started_at
+		`, now, attemptUUID, id).Scan(&qaqStartedAt)
+	}
+	if qaqStartedAt.Valid {
+		qStartTime = qaqStartedAt.Time.UTC()
+	} else {
+		qStartTime = now
+	}
+
+	remainingSeconds := timeLimitSeconds
+	var expirationTime *time.Time
+	if timeLimitSeconds > 0 {
+		exp := qStartTime.Add(time.Duration(timeLimitSeconds) * time.Second)
+		expirationTime = &exp
+		elapsed := int(now.Sub(qStartTime).Seconds())
+		remainingSeconds = timeLimitSeconds - elapsed
+		if remainingSeconds <= 0 {
+			// Question time expired while away! Automatically mark as skipped in backend
+			log.Printf("GetNextQuestion: question %s expired for attempt %s (%ds elapsed of %ds limit), auto-skipping", id, attemptUUID, elapsed, timeLimitSeconds)
+			_ = s.SaveQuizAnswer(ctx, attemptID, userID, id.String(), "", timeLimitSeconds, true)
+			// Recurse to load the next question
+			return s.GetNextQuestion(ctx, attemptID, userID)
+		}
+	} else if timeLimitMinutes > 0 && startedAt.Valid {
+		totalSec := timeLimitMinutes * 60
+		elapsed := int(now.Sub(startedAt.Time.UTC()).Seconds())
+		rem := totalSec - elapsed
+		if rem < 0 {
+			rem = 0
+		}
+		remainingSeconds = rem
 	}
 
 	var optionsRaw json.RawMessage
@@ -1577,29 +1669,22 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 	remaining := limitCount - answeredCount
 	isLast := questionOrder >= limitCount
 
-	remainingSeconds := timeLimitSeconds
-	if timeLimitMinutes > 0 && startedAt.Valid {
-		totalSec := timeLimitMinutes * 60
-		elapsed := int(time.Since(startedAt.Time).Seconds())
-		rem := totalSec - elapsed
-		if rem < 0 {
-			rem = 0
-		}
-		remainingSeconds = rem
-	} else if timeLimitSeconds > 0 {
-		remainingSeconds = timeLimitSeconds
-	}
-
 	qObj := map[string]interface{}{
-		"id":                 id.String(),
-		"text":               qText,
-		"question_text":      qText,
-		"type":               qType,
-		"question_type":      qType,
-		"difficulty":         difficulty,
-		"time_limit_seconds": timeLimitSeconds,
-		"options":            optionsRaw,
-		"status":             "unanswered",
+		"id":                  id.String(),
+		"text":                qText,
+		"question_text":       qText,
+		"type":                qType,
+		"question_type":       qType,
+		"difficulty":          difficulty,
+		"time_limit_seconds":  timeLimitSeconds,
+		"remaining_seconds":   remainingSeconds,
+		"question_start_time": qStartTime.Format(time.RFC3339),
+		"is_skipped":          false,
+		"options":             optionsRaw,
+		"status":              "unanswered",
+	}
+	if expirationTime != nil {
+		qObj["expiration_time"] = expirationTime.Format(time.RFC3339)
 	}
 	if codingDetails != nil {
 		qObj["coding_details"] = codingDetails
@@ -1611,6 +1696,7 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		"answered":            answeredCount,
 		"skipped":             skippedCount,
 		"remaining_seconds":   remainingSeconds,
+		"question_start_time": qStartTime.Format(time.RFC3339),
 		"remaining_questions": remaining,
 		"is_last_question":    isLast,
 		"status":              status,
@@ -1620,8 +1706,12 @@ func (s *QuizService) GetNextQuestion(ctx context.Context, attemptID string, use
 		"question_type":       qType,
 		"difficulty":          difficulty,
 		"time_limit_seconds":  timeLimitSeconds,
+		"is_skipped":          false,
 		"options":             optionsRaw,
 		"question":            qObj,
+	}
+	if expirationTime != nil {
+		resp["expiration_time"] = expirationTime.Format(time.RFC3339)
 	}
 	if codingDetails != nil {
 		resp["coding_details"] = codingDetails
@@ -1761,18 +1851,29 @@ func (s *QuizService) SaveQuizAnswer(ctx context.Context, attemptID, userID, que
 
 	// 6. Enforce time limit with server-authoritative verification
 	if timeLimitSeconds > 0 {
-		if timeSpent > timeLimitSeconds {
+		if !isSkipped && timeSpent > timeLimitSeconds {
 			return fmt.Errorf("time limit exceeded for this question (%d seconds)", timeLimitSeconds)
 		}
-		if !alreadyAnswered && lastActivityAt.Valid {
-			serverElapsed := int(time.Since(lastActivityAt.Time).Seconds())
-			if serverElapsed > timeLimitSeconds+15 {
+		nowUTC := time.Now().UTC()
+		var qaqStartedAt pgtype.Timestamp
+		_ = tx.QueryRow(ctx, `SELECT started_at FROM quiz_attempt_questions WHERE quiz_attempt_id = $1 AND question_id = $2`, attemptUUID, questionUUID).Scan(&qaqStartedAt)
+		if qaqStartedAt.Valid {
+			serverElapsed := int(nowUTC.Sub(qaqStartedAt.Time.UTC()).Seconds())
+			if !isSkipped && serverElapsed > timeLimitSeconds+15 {
+				return fmt.Errorf("time limit exceeded for this question (%d seconds)", timeLimitSeconds)
+			}
+		} else if !alreadyAnswered && lastActivityAt.Valid {
+			serverElapsed := int(nowUTC.Sub(lastActivityAt.Time.UTC()).Seconds())
+			if !isSkipped && serverElapsed > timeLimitSeconds+15 {
 				return fmt.Errorf("time limit exceeded for this question (%d seconds)", timeLimitSeconds)
 			}
 		}
 	}
 	if timeSpent < 0 {
 		timeSpent = 0
+	}
+	if timeLimitSeconds > 0 && isSkipped && timeSpent > timeLimitSeconds {
+		timeSpent = timeLimitSeconds
 	}
 
 	// 7. Determine correctness
